@@ -5,13 +5,13 @@ import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 
 import { collection, doc, getDoc, getDocs, limit, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
-import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useAuth } from '@/hooks/useAuth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { db, storage } from '@/lib/firebase';
+import { uploadToCloudinary } from '@/lib/cloudinaryUpload';
+import { db } from '@/lib/firebase';
 
 function normalizeUsername(input: string) {
   // Case-insensitive uniqueness: store + check lowercase.
@@ -94,16 +94,7 @@ export default function ProfileSetupScreen() {
 
     setAvatarUploading(true);
     try {
-      const storageRef = ref(storage, `users/${user!.uid}/avatar.jpg`);
-
-      const response = await fetch(avatarUri);
-      const blob = await response.blob();
-
-      await uploadBytes(storageRef, blob, {
-        contentType: blob.type || 'image/jpeg',
-      });
-      const downloadUrl = await getDownloadURL(storageRef);
-      return downloadUrl;
+      return await uploadToCloudinary(avatarUri);
     } finally {
       setAvatarUploading(false);
     }
@@ -148,9 +139,14 @@ export default function ProfileSetupScreen() {
         bio: trimmedBio,
         avatarUrl,
         createdAt: serverTimestamp(),
-        followers: [],
-        following: [],
+        currentStreak: 0,
+        bestStreak: 0,
+        restDaysUsedThisWeek: 0,
         totalWorkouts: 0,
+        lastPostDate: '',
+        weekStartDate: '',
+        following: [],
+        followers: [],
       });
 
       router.replace('/(tabs)' as any);

@@ -1,133 +1,238 @@
 import { MaterialIcons } from '@expo/vector-icons';
-import React from 'react';
-import { FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Timestamp } from 'firebase/firestore';
+import { useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+
+import { useAuthContext } from '@/contexts/AuthProvider';
+import { getFeedPosts, getUser } from '@/lib/firestore';
+
+const COLORS = {
+  bg: '#0D0D0D',
+  card: '#1A1A1A',
+  accent: '#FF4B1F',
+  text: '#FFFFFF',
+};
+
+type Story = { id: string; name: string; postedToday: boolean; initials: string };
+type FlameMeta = { likes: number; comments: number };
+
+type PRPost = {
+  id: string;
+  type: 'pr';
+  author: { name: string; initials: string; ringColor: string };
+  headline: string;
+  prText: string;
+  exercise: string;
+  detail: string;
+  previousBest: string;
+  meta: FlameMeta;
+  leaderboardRank?: string;
+};
+
+type WorkoutPost = {
+  id: string;
+  type: 'workout';
+  author: { name: string; initials: string; ringColor: string };
+  title: string;
+  duration: string;
+  items: { label: string; detail: string }[];
+  caption: string;
+  meta: FlameMeta;
+  leaderboardRank?: string;
+  avatarRightText?: string;
+};
+
+type RestPost = {
+  id: string;
+  type: 'rest';
+  author: { name: string; initials: string; ringColor: string };
+  text: string;
+  streakText: string;
+  meta: FlameMeta;
+  avatarRightText?: string;
+};
+
+function formatRelativeTime(ts: Timestamp | undefined): string {
+  if (!ts || !(ts instanceof Timestamp)) return '';
+  const d = ts.toDate();
+  const now = Date.now();
+  const diffMs = now - d.getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function summarizeExerciseSets(
+  sets?: { kg?: string; reps?: string; done?: boolean }[],
+): string {
+  if (!sets?.length) return '—';
+  return sets
+    .map((s) => {
+      const kg = s.kg?.trim() || '—';
+      const r = s.reps?.trim() || '—';
+      return `${kg}×${r}`;
+    })
+    .join(' · ');
+}
+
+function normalizeFirestorePost(raw: Record<string, unknown> & { id?: string }): PRPost | WorkoutPost | RestPost | null {
+  const id = String(raw.id ?? '');
+  const type = raw.type as string | undefined;
+  const likes = Array.isArray(raw.likes) ? raw.likes.length : 0;
+  const meta: FlameMeta = { likes, comments: 0 };
+  const createdAt = raw.createdAt as Timestamp | undefined;
+
+  const author = {
+    name: String(raw.username ?? 'user'),
+    initials: String(raw.userInitials ?? '??').slice(0, 2),
+    ringColor: '#FF4B1F',
+  };
+
+  if (type === 'pr') {
+    const w = raw.weight as number | undefined;
+    const prev = raw.previousBest as number | undefined;
+    return {
+      id,
+      type: 'pr',
+      author,
+      headline: `${author.name} just hit a new PR!`,
+      prText: w != null ? `${w}kg` : '—',
+      exercise: String(raw.exercise ?? ''),
+      detail: '',
+      previousBest: prev != null ? `Previous best: ${prev}kg` : '',
+      meta,
+      leaderboardRank: undefined,
+    };
+  }
+
+  if (type === 'workout' || type === 'cardio') {
+    const exercises = raw.exercises as
+      | { id?: string; name?: string; sets?: { kg?: string; reps?: string; done?: boolean }[] }[]
+      | undefined;
+    const items =
+      exercises?.map((ex, idx) => ({
+        label: ex.name?.trim() || `Exercise ${idx + 1}`,
+        detail: summarizeExerciseSets(ex.sets),
+      })) ?? [];
+    const workoutName = String(raw.workoutName ?? (type === 'cardio' ? 'Cardio' : 'Workout'));
+    const duration = typeof raw.duration === 'string' ? raw.duration : '—';
+    const caption = typeof raw.caption === 'string' ? raw.caption : '';
+    return {
+      id,
+      type: 'workout',
+      author,
+      title: workoutName,
+      duration,
+      items: items.length ? items : [{ label: workoutName, detail: '—' }],
+      caption,
+      meta,
+      leaderboardRank: undefined,
+      avatarRightText: `${formatRelativeTime(createdAt)} · ${workoutName.toLowerCase()}`,
+    };
+  }
+
+  if (type === 'rest') {
+    return {
+      id,
+      type: 'rest',
+      author,
+      text: 'Rest day',
+      streakText: typeof raw.streakText === 'string' ? raw.streakText : 'streak kept 🔥',
+      meta,
+      avatarRightText: `${formatRelativeTime(createdAt)} · rest`,
+    };
+  }
+
+  return null;
+}
 
 export default function HomeScreen() {
-  const COLORS = {
-    bg: '#0D0D0D',
-    card: '#1A1A1A',
-    accent: '#FF4B1F',
-    text: '#FFFFFF',
-  };
+  const router = useRouter();
+  const { user } = useAuthContext();
+  const [posts, setPosts] = useState<any[]>([]);
+  const [userData, setUserData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [stories, setStories] = useState<Story[]>([]);
 
-  type Story = { id: string; name: string; postedToday: boolean; initials: string };
-  type FlameMeta = { likes: number; comments: number };
+  const loadFeed = useCallback(async () => {
+    if (!user) return;
+    try {
+      const u = await getUser(user.uid);
+      setUserData(u);
+      const followingIds = [...(u?.following ?? []), user.uid];
+      const feedPosts = await getFeedPosts(followingIds);
+      setPosts(feedPosts);
 
-  type PRPost = {
-    id: string;
-    type: 'pr';
-    author: { name: string; initials: string; ringColor: string };
-    headline: string;
-    prText: string;
-    exercise: string;
-    detail: string;
-    previousBest: string;
-    meta: FlameMeta;
-    leaderboardRank?: string;
-  };
+      const initialsFrom = (name: string) => {
+        const t = name.trim();
+        if (t.length >= 2) return t.slice(0, 2).toUpperCase();
+        if (t.length === 1) return (t + t).toUpperCase();
+        return 'YO';
+      };
 
-  type WorkoutPost = {
-    id: string;
-    type: 'workout';
-    author: { name: string; initials: string; ringColor: string };
-    title: string;
-    duration: string;
-    items: { label: string; detail: string }[];
-    caption: string;
-    meta: FlameMeta;
-    leaderboardRank?: string;
-  };
+      const following = u?.following ?? [];
+      if (following.length === 0) {
+        setStories([
+          {
+            id: user.uid,
+            name: u?.displayName ?? 'You',
+            initials: initialsFrom(u?.displayName ?? 'YO'),
+            postedToday: true,
+          },
+        ]);
+      } else {
+        const profiles = await Promise.all(following.map((fid) => getUser(fid)));
+        const friendStories: Story[] = [];
+        profiles.forEach((p, i) => {
+          if (!p) return;
+          const name = p.displayName ?? p.username ?? 'Friend';
+          friendStories.push({
+            id: following[i],
+            name,
+            initials: initialsFrom(p.displayName ?? p.username ?? 'FR'),
+            postedToday: false,
+          });
+        });
+        setStories(friendStories);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
 
-  type RestPost = {
-    id: string;
-    type: 'rest';
-    author: { name: string; initials: string; ringColor: string };
-    text: string;
-    streakText: string;
-    meta: FlameMeta;
-  };
+  useEffect(() => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    void loadFeed();
+  }, [user, loadFeed]);
 
-  const stories: Story[] = [
-    { id: 's1', name: 'Siddharth', initials: 'SK', postedToday: true },
-    { id: 's2', name: 'Arjun', initials: 'AR', postedToday: false },
-    { id: 's3', name: 'Priya', initials: 'PV', postedToday: false },
-    { id: 's4', name: 'Rahul', initials: 'RK', postedToday: true },
-    { id: 's5', name: 'Karan', initials: 'KS', postedToday: true },
-  ];
-
-  const posts: (PRPost | WorkoutPost | RestPost)[] = [
-    {
-      id: 'p1',
-      type: 'pr',
-      author: { name: 'Siddharth_k', initials: 'SK', ringColor: '#FF4B1F' },
-      headline: 'Siddharth just got +1!',
-      prText: '120kg',
-      exercise: 'Bench Press',
-      detail: '5x5 - 100kg',
-      previousBest: 'Previous best: 115kg',
-      meta: { likes: 24, comments: 6 },
-      leaderboardRank: '#1 on leaderboard',
-    },
-    {
-      id: 'p2',
-      type: 'workout',
-      author: { name: 'arjun_r', initials: 'AR', ringColor: '#3B82F6' },
-      title: 'Leg Day',
-      duration: '52 min',
-      items: [
-        { label: 'Squat', detail: '5×5 - 100kg' },
-        { label: 'Romanian Deadlift', detail: '4×8 - 80kg' },
-      ],
-      caption: 'legs are done. someone carry me',
-      meta: { likes: 18, comments: 3 },
-      leaderboardRank: '#2 leaderboard',
-    },
-    {
-      id: 'p3',
-      type: 'pr',
-      author: { name: 'Priya_f', initials: 'PV', ringColor: '#FF4B1F' },
-      headline: 'Priya just hit a new PR!',
-      prText: '92kg',
-      exercise: 'Deadlift',
-      detail: '3x10 - 92kg',
-      previousBest: 'Previous best: 80kg',
-      meta: { likes: 9, comments: 2 },
-    },
-    {
-      id: 'p4',
-      type: 'rest',
-      author: { name: 'rahul_k', initials: 'HK', ringColor: '#22C55E' },
-      text: 'Rest day',
-      streakText: 'streak kept 🔥 02/02',
-      meta: { likes: 5, comments: 1 },
-    },
-    {
-      id: 'p5',
-      type: 'workout',
-      author: { name: 'Siddharth_k', initials: 'SK', ringColor: '#FF4B1F' },
-      title: 'Upper Body',
-      duration: '41 min',
-      items: [
-        { label: 'Bench Press', detail: '4×6 - 85kg' },
-        { label: 'Row', detail: '3×10 - 60kg' },
-      ],
-      caption: 'quick session. felt strong',
-      meta: { likes: 12, comments: 2 },
-    },
-    {
-      id: 'p6',
-      type: 'rest',
-      author: { name: 'Karan', initials: 'KS', ringColor: '#F97316' },
-      text: 'Rest day',
-      streakText: 'streak kept 🔥 01/02',
-      meta: { likes: 3, comments: 0 },
-    },
-  ];
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadFeed();
+    setRefreshing(false);
+  }, [loadFeed]);
 
   const StoryPill = ({ item }: { item: Story }) => {
     const ringColor = item.postedToday ? '#FF4B1F' : '#2a2a2a';
     return (
-      <View style={styles.storyWrap} key={item.id}>
+      <View style={styles.storyWrap}>
         <View style={[styles.storyRing, { borderColor: ringColor }]}>
           <View style={styles.storyAvatar}>
             <Text style={styles.storyInitials}>{item.initials}</Text>
@@ -175,8 +280,8 @@ export default function HomeScreen() {
             <Text style={styles.prNew}>NEW PR</Text>
             <Text style={styles.prValue}>{post.prText}</Text>
             <Text style={styles.prExercise}>{post.exercise}</Text>
-            <Text style={styles.prDetail}>{post.detail}</Text>
-            <Text style={styles.prPrev}>{post.previousBest}</Text>
+            {post.detail ? <Text style={styles.prDetail}>{post.detail}</Text> : null}
+            {post.previousBest ? <Text style={styles.prPrev}>{post.previousBest}</Text> : null}
           </View>
 
           {post.leaderboardRank ? (
@@ -196,7 +301,7 @@ export default function HomeScreen() {
     if (post.type === 'workout') {
       return (
         <View style={[styles.card, styles.cardDark]} key={post.id}>
-          <AvatarRow author={post.author} rightText="14 min ago - leg day" />
+          <AvatarRow author={post.author} rightText={post.avatarRightText ?? 'workout'} />
 
           <View style={styles.workoutHeader}>
             <Text style={styles.workoutTitle}>{post.title} ·</Text>
@@ -204,8 +309,8 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.workoutGrid}>
-            {post.items.map((it) => (
-              <View key={it.label} style={styles.workoutItem}>
+            {post.items.map((it, idx) => (
+              <View key={`${post.id}-${it.label}-${idx}`} style={styles.workoutItem}>
                 <Text style={styles.workoutItemLabel}>{it.label}</Text>
                 <Text style={styles.workoutItemDetail}>{it.detail}</Text>
               </View>
@@ -218,7 +323,7 @@ export default function HomeScreen() {
             </View>
           ) : null}
 
-          <Text style={styles.captionText}>{post.caption}</Text>
+          {post.caption ? <Text style={styles.captionText}>{post.caption}</Text> : null}
 
           <View style={styles.metaRowDark}>
             <Text style={styles.metaFlameDark}>🔥 {post.meta.likes}</Text>
@@ -230,7 +335,7 @@ export default function HomeScreen() {
 
     return (
       <View style={[styles.card, styles.cardDark]} key={post.id}>
-        <AvatarRow author={post.author} rightText="rest day" />
+        <AvatarRow author={post.author} rightText={post.avatarRightText ?? 'rest day'} />
 
         <View style={styles.restRow}>
           <Text style={styles.restZzz}>💤</Text>
@@ -247,6 +352,18 @@ export default function HomeScreen() {
     );
   };
 
+  if (loading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#0D0D0D', alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator color="#FF4B1F" size="large" />
+      </View>
+    );
+  }
+
+  const normalizedPosts = posts
+    .map((p) => normalizeFirestorePost(p as Record<string, unknown> & { id?: string }))
+    .filter((p): p is PRPost | WorkoutPost | RestPost => p != null);
+
   return (
     <View style={styles.screen}>
       <View style={styles.safeArea}>
@@ -260,7 +377,7 @@ export default function HomeScreen() {
             <TouchableOpacity style={styles.iconBtn} onPress={() => {}}>
               <MaterialIcons name="notifications" size={20} color={COLORS.text} />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.iconBtn} onPress={() => {}}>
+            <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/search' as any)}>
               <MaterialIcons name="search" size={20} color={COLORS.text} />
             </TouchableOpacity>
           </View>
@@ -269,6 +386,7 @@ export default function HomeScreen() {
         <View style={styles.storiesBannerGroup}>
           <FlatList
             data={stories}
+            extraData={userData}
             horizontal
             style={{ flexShrink: 1 }}
             showsHorizontalScrollIndicator={false}
@@ -287,12 +405,23 @@ export default function HomeScreen() {
         <ScrollView
           style={styles.feed}
           contentContainerStyle={styles.feedContent}
-          showsVerticalScrollIndicator={false}>
-          {posts.map((p) => (
-            <View key={p.id} style={styles.postWrap}>
-              <PostCard post={p} />
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF4B1F" />
+          }>
+          {normalizedPosts.length === 0 ? (
+            <View style={{ alignItems: 'center', padding: 40 }}>
+              <Text style={{ color: '#444', fontSize: 14, fontWeight: '600', textAlign: 'center' }}>
+                No posts yet — log a workout or add friends to see their posts here
+              </Text>
             </View>
-          ))}
+          ) : (
+            normalizedPosts.map((p) => (
+              <View key={p.id} style={styles.postWrap}>
+                <PostCard post={p} />
+              </View>
+            ))
+          )}
         </ScrollView>
       </View>
     </View>
@@ -303,10 +432,10 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: '#0D0D0D',
+    paddingTop: 50,
   },
   safeArea: {
     flex: 1,
-    paddingTop: 16,
   },
   topBar: {
     paddingHorizontal: 16,
@@ -336,8 +465,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   iconBtn: {
-    width: 40,
-    height: 40,
+    minWidth: 44,
+    minHeight: 44,
+    padding: 10,
     borderRadius: 999,
     backgroundColor: '#1A1A1A',
     alignItems: 'center',

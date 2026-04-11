@@ -26,6 +26,7 @@ export default function RootLayout() {
           <Stack.Screen name="log-workout" options={{ headerShown: false }} />
           <Stack.Screen name="log-cardio" options={{ headerShown: false }} />
           <Stack.Screen name="log-pr" options={{ headerShown: false }} />
+          <Stack.Screen name="search" options={{ headerShown: false }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
         </Stack>
         <StatusBar style="auto" />

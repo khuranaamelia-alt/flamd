@@ -3,6 +3,7 @@ import { Timestamp } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -90,9 +91,16 @@ export default function ProfileScreen() {
         {/* Profile header */}
         <View style={styles.headerRow}>
           <View style={styles.avatarWrap}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarInitials}>{initials}</Text>
-            </View>
+            {userData?.avatarUrl ? (
+              <Image
+                source={{ uri: userData.avatarUrl }}
+                style={{ width: 70, height: 70, borderRadius: 35 }}
+              />
+            ) : (
+              <View style={styles.avatar}>
+                <Text style={styles.avatarInitials}>{initials}</Text>
+              </View>
+            )}
             <View style={styles.editBadge}>
               <Text style={styles.editPencil}>✎</Text>
             </View>

@@ -1,7 +1,8 @@
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Pressable,
   ScrollView,
@@ -11,15 +12,60 @@ import {
   View,
 } from 'react-native';
 
+import { useAuthContext } from '@/contexts/AuthProvider';
+import { createPost, getUser, useRestDay as applyRestDay } from '@/lib/firestore';
+
 const BG = '#0D0D0D';
 const CARD = '#1A1A1A';
 const ACCENT = '#FF4B1F';
 
-/** Change to 0 or 1 to preview other rest-day states. */
-const restDaysLeft: 0 | 1 | 2 = 2;
-
 export default function PostScreen() {
   const router = useRouter();
+  const { user } = useAuthContext();
+
+  const [restDaysLeft, setRestDaysLeft] = useState(2);
+  const [userData, setUserData] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    const load = async () => {
+      const u = await getUser(user.uid);
+      setUserData(u);
+      setRestDaysLeft(Math.max(0, 2 - (u?.restDaysUsedThisWeek ?? 0)));
+    };
+    load();
+  }, [user]);
+
+  const handleRestDay = useCallback(async () => {
+    if (!user) return;
+    if (restDaysLeft <= 0) {
+      Alert.alert(
+        'No rest days left',
+        'You have used both rest days this week. Resets every Monday.',
+      );
+      return;
+    }
+    setSaving(true);
+    try {
+      await applyRestDay(user.uid);
+      const latest = await getUser(user.uid);
+      setUserData(latest);
+      await createPost({
+        type: 'rest',
+        userId: user.uid,
+        username: latest?.username ?? '',
+        userInitials: latest?.displayName?.slice(0, 2).toUpperCase() ?? '',
+        isPublic: true,
+        restDayNumber: 2 - restDaysLeft + 1,
+      });
+      router.push('/(tabs)/' as any);
+    } catch {
+      Alert.alert('Error', 'Could not post rest day. Try again.');
+    } finally {
+      setSaving(false);
+    }
+  }, [user, restDaysLeft, router]);
 
   const onCancel = useCallback(() => {
     if (router.canGoBack()) {
@@ -40,14 +86,6 @@ export default function PostScreen() {
       allowsEditing: false,
       quality: 0.85,
     });
-  }, []);
-
-  const restDayPress = useCallback(() => {
-    if (restDaysLeft === 0) {
-      Alert.alert('No rest days left', 'No rest days left — resets Monday');
-      return;
-    }
-    // Wire to rest-day post flow when ready
   }, []);
 
   const restBorderStyle =
@@ -149,28 +187,40 @@ export default function PostScreen() {
 
         <TouchableOpacity
           style={[styles.restButton, restBorderStyle]}
-          onPress={restDayPress}
-          activeOpacity={0.85}>
-          <Text style={styles.restEmoji}>💤</Text>
-          <View style={styles.restTextCol}>
-            <Text style={styles.restTitle}>Post rest day</Text>
-            <Text style={styles.restSub}>Keeps your streak alive. Resets every Monday.</Text>
-          </View>
-          <View style={[styles.counterBox, restDaysLeft === 1 && styles.counterBoxWarn]}>
-            <Text
-              style={[
-                styles.counterNum,
-                restDaysLeft === 1 && styles.counterNumOrange,
-                restDaysLeft === 0 && styles.counterNumDisabled,
-              ]}>
-              {restDaysLeft}
-            </Text>
-            {restDaysLeft === 1 ? (
-              <Text style={styles.useWisely}>use wisely</Text>
-            ) : (
-              <Text style={styles.counterLeft}>left</Text>
-            )}
-          </View>
+          onPress={handleRestDay}
+          activeOpacity={restDaysLeft === 0 || saving ? 1 : 0.85}
+          disabled={restDaysLeft === 0 || saving}
+          accessibilityLabel={
+            userData ? `Post rest day, ${restDaysLeft} left` : 'Post rest day'
+          }>
+          {saving ? (
+            <View style={styles.restSavingWrap}>
+              <ActivityIndicator color={ACCENT} size="large" />
+            </View>
+          ) : (
+            <>
+              <Text style={styles.restEmoji}>💤</Text>
+              <View style={styles.restTextCol}>
+                <Text style={styles.restTitle}>Post rest day</Text>
+                <Text style={styles.restSub}>Keeps your streak alive. Resets every Monday.</Text>
+              </View>
+              <View style={[styles.counterBox, restDaysLeft === 1 && styles.counterBoxWarn]}>
+                <Text
+                  style={[
+                    styles.counterNum,
+                    restDaysLeft === 1 && styles.counterNumOrange,
+                    restDaysLeft === 0 && styles.counterNumDisabled,
+                  ]}>
+                  {restDaysLeft}
+                </Text>
+                {restDaysLeft === 1 ? (
+                  <Text style={styles.useWisely}>use wisely</Text>
+                ) : (
+                  <Text style={styles.counterLeft}>left</Text>
+                )}
+              </View>
+            </>
+          )}
         </TouchableOpacity>
       </ScrollView>
     </View>
@@ -443,5 +493,12 @@ const styles = StyleSheet.create({
     fontSize: 8,
     marginTop: 2,
     textAlign: 'center',
+  },
+  restSavingWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    minHeight: 56,
   },
 });

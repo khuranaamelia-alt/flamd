@@ -29,12 +29,15 @@ export interface UserDocument extends DocumentData {
   bio?: string;
   avatarUrl?: string;
   totalWorkouts?: number;
-  /** Last day user posted (workout or rest day activity for streak). */
-  lastPostDate?: Timestamp | null;
+  /** Last day user posted; empty string until first activity (new users). */
+  lastPostDate?: Timestamp | null | '';
+  /** ISO or app-specific week key; empty until set. */
+  weekStartDate?: string | '';
   currentStreak?: number;
   bestStreak?: number;
   restDaysUsedThisWeek?: number;
   following?: string[];
+  followers?: string[];
 }
 
 export interface PostDocument extends DocumentData {
@@ -131,6 +134,59 @@ export async function updateUser(
     await updateDoc(ref, data);
   } catch (error) {
     console.error('[firestore:updateUser]', error);
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+}
+
+export async function followUser(currentUid: string, targetUid: string): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'users', currentUid), {
+      following: arrayUnion(targetUid),
+    });
+    await updateDoc(doc(db, 'users', targetUid), {
+      followers: arrayUnion(currentUid),
+    });
+  } catch (error) {
+    console.error('[firestore:followUser]', error);
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+}
+
+export async function unfollowUser(currentUid: string, targetUid: string): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'users', currentUid), {
+      following: arrayRemove(targetUid),
+    });
+    await updateDoc(doc(db, 'users', targetUid), {
+      followers: arrayRemove(currentUid),
+    });
+  } catch (error) {
+    console.error('[firestore:unfollowUser]', error);
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+}
+
+/** Prefix search on lowercase `username` (same format as profile-setup). */
+export async function searchUsersByUsernamePrefix(
+  prefix: string,
+): Promise<(UserDocument & { uid: string })[]> {
+  try {
+    const trimmed = prefix.trim().toLowerCase();
+    if (!trimmed) return [];
+    const q = query(
+      collection(db, 'users'),
+      where('username', '>=', trimmed),
+      where('username', '<=', `${trimmed}\uf8ff`),
+      limit(30),
+    );
+    const snap = await getDocs(q);
+    const out: (UserDocument & { uid: string })[] = [];
+    snap.forEach((d) => {
+      out.push({ ...d.data(), uid: d.id } as UserDocument & { uid: string });
+    });
+    return out;
+  } catch (error) {
+    console.error('[firestore:searchUsersByUsernamePrefix]', error);
     throw error instanceof Error ? error : new Error(String(error));
   }
 }
