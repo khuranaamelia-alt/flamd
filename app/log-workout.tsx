@@ -147,19 +147,19 @@ export default function LogWorkoutScreen() {
       return;
     }
 
+    const freshUser = await getUser(user.uid);
+    setUserData(freshUser);
     setSaving(true);
     try {
-      const initials =
-        userData?.displayName?.trim().slice(0, 2).toUpperCase() ?? 'YO';
-
       await createPost({
         userId: user.uid,
         type: 'workout',
         workoutName: workoutName.trim() || 'Workout',
         exercises,
         isPublic: postToFeed,
-        username: userData?.username ?? '',
-        userInitials: initials,
+        username: freshUser?.username ?? '',
+        userInitials: freshUser?.displayName?.slice(0, 2).toUpperCase() ?? '',
+        authorStreak: (freshUser?.currentStreak ?? 0) + 1,
       });
 
       await updateStreak(user.uid);

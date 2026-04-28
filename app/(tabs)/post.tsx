@@ -1,6 +1,6 @@
 import * as ImagePicker from 'expo-image-picker';
-import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -13,7 +13,12 @@ import {
 } from 'react-native';
 
 import { useAuthContext } from '@/contexts/AuthProvider';
-import { createPost, getUser, useRestDay as applyRestDay } from '@/lib/firestore';
+import {
+  createPost,
+  getUser,
+  maybeResetWeeklyRestDays,
+  useRestDay as applyRestDay,
+} from '@/lib/firestore';
 
 const BG = '#0D0D0D';
 const CARD = '#1A1A1A';
@@ -27,15 +32,19 @@ export default function PostScreen() {
   const [userData, setUserData] = useState<any>(null);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
+  const loadUserData = useCallback(async () => {
     if (!user) return;
-    const load = async () => {
-      const u = await getUser(user.uid);
-      setUserData(u);
-      setRestDaysLeft(Math.max(0, 2 - (u?.restDaysUsedThisWeek ?? 0)));
-    };
-    load();
+    await maybeResetWeeklyRestDays(user.uid);
+    const u = await getUser(user.uid);
+    setUserData(u);
+    setRestDaysLeft(Math.max(0, 2 - (u?.restDaysUsedThisWeek ?? 0)));
   }, [user]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadUserData();
+    }, [loadUserData]),
+  );
 
   const handleRestDay = useCallback(async () => {
     if (!user) return;
@@ -58,6 +67,7 @@ export default function PostScreen() {
         userInitials: latest?.displayName?.slice(0, 2).toUpperCase() ?? '',
         isPublic: true,
         restDayNumber: 2 - restDaysLeft + 1,
+        authorStreak: latest?.currentStreak ?? 0,
       });
       router.push('/(tabs)/' as any);
     } catch {
@@ -114,7 +124,7 @@ export default function PostScreen() {
         <View style={styles.streakCard}>
           <Text style={styles.streakEmoji}>🔥</Text>
           <View style={styles.streakMid}>
-            <Text style={styles.streakDays}>14 days</Text>
+            <Text style={styles.streakDays}>{userData?.currentStreak ?? 0} days</Text>
             <Text style={styles.streakSub}>current streak</Text>
           </View>
           <Text style={styles.streakRight}>

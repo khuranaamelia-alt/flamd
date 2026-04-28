@@ -149,7 +149,7 @@ export default function ProfileSetupScreen() {
         followers: [],
       });
 
-      router.replace('/(tabs)' as any);
+      router.replace('/add-friends' as any);
     } catch (e) {
       const msg = (e as { message?: string })?.message ?? String(e);
       console.log('Profile setup error:', msg);

@@ -1,6 +1,7 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import { Timestamp } from 'firebase/firestore';
-import React, { useEffect, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -35,27 +36,31 @@ function formatPrDate(ts?: Timestamp): string {
 }
 
 export default function ProfileScreen() {
+  const router = useRouter();
   const { user } = useAuthContext();
   const [userData, setUserData] = useState<any>(null);
   const [prs, setPrs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-    const load = async () => {
-      try {
-        const [u, p] = await Promise.all([getUser(user.uid), getUserPRs(user.uid)]);
-        setUserData(u as UserDocument | null);
-        setPrs(p as (PRRecord & { exercise: string })[]);
-      } finally {
+  useFocusEffect(
+    useCallback(() => {
+      if (!user) {
         setLoading(false);
+        return;
       }
-    };
-    load();
-  }, [user]);
+      setLoading(true);
+      const load = async () => {
+        try {
+          const [u, p] = await Promise.all([getUser(user.uid), getUserPRs(user.uid)]);
+          setUserData(u as UserDocument | null);
+          setPrs(p as (PRRecord & { exercise: string })[]);
+        } finally {
+          setLoading(false);
+        }
+      };
+      void load();
+    }, [user]),
+  );
 
   if (loading) {
     return (
@@ -109,9 +114,9 @@ export default function ProfileScreen() {
             <Text style={styles.displayName}>{userData?.displayName ?? 'Your Name'}</Text>
             <Text style={styles.handle}>@{userData?.username ?? 'yourhandle'}</Text>
             <Text style={styles.bio}>{userData?.bio ?? ''}</Text>
-            <View style={styles.editPill}>
+            <Pressable style={styles.editPill} onPress={() => router.push('/edit-profile' as any)}>
               <Text style={styles.editPillText}>Edit profile</Text>
-            </View>
+            </Pressable>
           </View>
         </View>
 

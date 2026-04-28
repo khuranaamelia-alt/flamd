@@ -1,36 +1,40 @@
-import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useAuthContext } from '@/contexts/AuthProvider';
+import {
+  type UserDocument,
+  getLeaderboard,
+  getUser,
+  notifyGetFlamd,
+} from '@/lib/firestore';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 type GroupTab = { id: string; label: string; emoji?: string; active?: boolean };
-type CategoryTab = { id: string; label: string; emoji: string; active?: boolean };
-
-type PodiumUser = {
-  place: 1 | 2 | 3;
-  name: string;
-  initials: string;
-  streakText: string;
-  avatarFill: string;
-  borderColor: string;
-  podiumHeight: number;
-  crown?: boolean;
-};
-
-type RankedRow = {
-  id: string;
-  rank: number;
-  name: string;
-  initials: string;
-  statsLine: string;
-  streakNumber: string;
-  avatarFill: string;
-  highlight?: boolean;
-};
+type CategoryTab = { id: 'Streak' | 'Sessions' | 'PRs'; label: string; emoji: string };
 
 const FLAMD = {
   bg: '#0D0D0D',
   card: '#1A1A1A',
   accent: '#FF4B1F',
 };
+
+function initialsFromDisplayName(name: string): string {
+  const t = name.trim();
+  if (t.length >= 2) return t.slice(0, 2).toUpperCase();
+  if (t.length === 1) return (t + t).toUpperCase();
+  return '?';
+}
+
+function displayLabel(u: UserDocument & { uid?: string }): string {
+  return String(u.displayName ?? u.username ?? 'User');
+}
 
 function AvatarCircle({
   initials,
@@ -60,7 +64,71 @@ function AvatarCircle({
   );
 }
 
+const PODIUM_VISUAL: Record<
+  1 | 2 | 3,
+  { podiumHeight: number; size: number; avatarFill: string; borderColor: string }
+> = {
+  2: { podiumHeight: 86, size: 48, avatarFill: '#2A2A2A', borderColor: '#A3A3A3' },
+  1: { podiumHeight: 112, size: 56, avatarFill: '#0D0D0D', borderColor: '#D7A21E' },
+  3: { podiumHeight: 70, size: 44, avatarFill: '#2B1B12', borderColor: '#B06E2C' },
+};
+
+const PLACEHOLDER_AVATAR = { fill: '#444444', borderColor: '#555555' };
+
 export default function LeaderboardScreen() {
+  const router = useRouter();
+  const { user } = useAuthContext();
+  const [leaderboardUsers, setLeaderboardUsers] = useState<(UserDocument & { uid?: string })[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeCategory, setActiveCategory] = useState<'Streak' | 'Sessions' | 'PRs'>('Streak');
+  const previousTopUidRef = useRef<string | undefined>(undefined);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+      const load = async () => {
+        setLoading(true);
+        try {
+          const u = await getUser(user.uid);
+          const followingIds = [...(u?.following ?? []), user.uid];
+          const users = await getLeaderboard(followingIds);
+          setLeaderboardUsers(users);
+
+          const streakSorted = [...users].sort(
+            (a, b) => (b.currentStreak ?? 0) - (a.currentStreak ?? 0),
+          );
+          const newTopUid = streakSorted[0]?.uid;
+          const prevTop = previousTopUidRef.current;
+          if (
+            prevTop &&
+            newTopUid &&
+            prevTop !== newTopUid &&
+            newTopUid !== user.uid
+          ) {
+            void notifyGetFlamd(newTopUid, prevTop);
+          }
+          if (newTopUid) {
+            previousTopUidRef.current = newTopUid;
+          }
+        } finally {
+          setLoading(false);
+        }
+      };
+      void load();
+    }, [user]),
+  );
+
+  const sortedUsers = useMemo(() => {
+    return [...leaderboardUsers].sort((a, b) => {
+      if (activeCategory === 'Streak') return (b.currentStreak ?? 0) - (a.currentStreak ?? 0);
+      if (activeCategory === 'Sessions') return (b.totalWorkouts ?? 0) - (a.totalWorkouts ?? 0);
+      return 0;
+    });
+  }, [leaderboardUsers, activeCategory]);
+
   const groupTabs: GroupTab[] = [
     { id: 'all', label: 'All friends', active: true },
     { id: 'gym', label: 'Gym Bros', emoji: '🏋️' },
@@ -69,86 +137,37 @@ export default function LeaderboardScreen() {
   ];
 
   const categoryTabs: CategoryTab[] = [
-    { id: 'streak', label: 'Streak', emoji: '🔥', active: true },
-    { id: 'sessions', label: 'Sessions', emoji: '💪' },
-    { id: 'prs', label: 'PRs', emoji: '🏆' },
+    { id: 'Streak', label: 'Streak', emoji: '🔥' },
+    { id: 'Sessions', label: 'Sessions', emoji: '💪' },
+    { id: 'PRs', label: 'PRs', emoji: '🏆' },
   ];
 
-  const podium: PodiumUser[] = [
-    {
-      place: 2,
-      name: 'Arjun',
-      initials: 'AR',
-      streakText: '🔥 18d',
-      avatarFill: '#2A2A2A',
-      borderColor: '#A3A3A3',
-      podiumHeight: 86,
-    },
-    {
-      place: 1,
-      name: 'Siddharth',
-      initials: 'SK',
-      streakText: '🔥 21d',
-      avatarFill: '#0D0D0D',
-      borderColor: '#D7A21E',
-      podiumHeight: 112,
-      crown: true,
-    },
-    {
-      place: 3,
-      name: 'Priya',
-      initials: 'PV',
-      streakText: '🔥 16d',
-      avatarFill: '#2B1B12',
-      borderColor: '#B06E2C',
-      podiumHeight: 70,
-    },
-  ];
+  /** Visual order: 2nd, 1st, 3rd (columns left → center → right). */
+  const podiumSlots = useMemo(() => {
+    const second = sortedUsers[1];
+    const first = sortedUsers[0];
+    const third = sortedUsers[2];
+    return [
+      { place: 2 as const, user: second },
+      { place: 1 as const, user: first, crown: true as const },
+      { place: 3 as const, user: third },
+    ];
+  }, [sortedUsers]);
+
+  const restRows = sortedUsers.slice(3);
 
   const getFlamdBanner = {
-    username: 'Siddharth',
-    prevUser: 'Arjun',
+    username: displayLabel(sortedUsers[0] ?? { displayName: 'Someone' }),
+    prevUser: displayLabel(sortedUsers[1] ?? { displayName: 'A friend' }),
   };
 
-  const rankedRows: RankedRow[] = [
-    {
-      id: 'you',
-      rank: 4,
-      name: 'You',
-      initials: 'YO',
-      statsLine: '🔥 14d streak · 4 sessions · 280kg PRs',
-      streakNumber: '14',
-      avatarFill: '#2A2A2A',
-      highlight: true,
-    },
-    {
-      id: 'rahul',
-      rank: 5,
-      name: 'Rahul',
-      initials: 'RK',
-      statsLine: '🔥 14d streak · 3 sessions · 240kg PRs',
-      streakNumber: '14',
-      avatarFill: '#2A2A2A',
-    },
-    {
-      id: 'karan',
-      rank: 6,
-      name: 'Karan',
-      initials: 'KS',
-      statsLine: '🔥 2d streak · 2 sessions · 310kg PRs',
-      streakNumber: '8',
-      avatarFill: '#2A2A2A',
-    },
-    {
-      id: 'arjun',
-      rank: 7,
-      name: 'Arjun',
-      initials: 'AR',
-      statsLine: '🔥 7d streak · 1 sessions · 180kg PRs',
-      streakNumber: '8',
-      avatarFill: '#2A2A2A',
-    },
-  ];
+  if (loading) {
+    return (
+      <View style={[styles.screen, styles.loadingScreen]}>
+        <ActivityIndicator color="#FF4B1F" size="large" />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.screen}>
@@ -182,10 +201,11 @@ export default function LeaderboardScreen() {
         {/* Category tabs */}
         <View style={styles.categoryTabsRow}>
           {categoryTabs.map((t) => {
-            const active = !!t.active;
+            const active = activeCategory === t.id;
             return (
-              <View
+              <Pressable
                 key={t.id}
+                onPress={() => setActiveCategory(t.id)}
                 style={[
                   styles.categoryTab,
                   active ? styles.categoryTabActive : styles.categoryTabInactive,
@@ -193,27 +213,38 @@ export default function LeaderboardScreen() {
                 <Text style={[styles.categoryTabText, active ? styles.categoryTabTextActive : styles.categoryTabTextInactive]}>
                   {t.emoji} {t.label}
                 </Text>
-              </View>
+              </Pressable>
             );
           })}
         </View>
 
         {/* Podium */}
         <View style={styles.podiumRow}>
-          {podium.map((u) => {
-            const position = u.place;
+          {podiumSlots.map((slot) => {
+            const position = slot.place;
+            const vis = PODIUM_VISUAL[position];
+            const u = slot.user;
+            const placeholder = !u;
+            const name = u ? displayLabel(u) : '—';
+            const streak = u?.currentStreak ?? 0;
+            const streakText =
+              streak === 0 ? `💔 ${streak}d` : `🔥 ${streak}d`;
+            const initials = u ? initialsFromDisplayName(displayLabel(u)) : '?';
+            const fill = placeholder ? PLACEHOLDER_AVATAR.fill : vis.avatarFill;
+            const border = placeholder ? PLACEHOLDER_AVATAR.borderColor : vis.borderColor;
+
             return (
-              <View key={u.place} style={styles.podiumCol}>
-                <View style={[styles.podiumStack, { height: u.podiumHeight }]}>
-                  {u.crown ? <Text style={styles.crown}>👑</Text> : <View style={{ height: 16 }} />}
+              <View key={slot.place} style={styles.podiumCol}>
+                <View style={[styles.podiumStack, { height: vis.podiumHeight }]}>
+                  {slot.crown ? <Text style={styles.crown}>👑</Text> : <View style={{ height: 16 }} />}
                   <AvatarCircle
-                    initials={u.initials}
-                    fill={u.avatarFill}
-                    borderColor={u.borderColor}
-                    size={u.place === 1 ? 56 : u.place === 2 ? 48 : 44}
+                    initials={initials}
+                    fill={fill}
+                    borderColor={border}
+                    size={vis.size}
                   />
-                  <Text style={styles.podiumName}>{u.name}</Text>
-                  <Text style={styles.podiumStreak}>{u.streakText}</Text>
+                  <Text style={styles.podiumName}>{name}</Text>
+                  <Text style={styles.podiumStreak}>{streakText}</Text>
                 </View>
                 <View
                   style={[
@@ -226,6 +257,12 @@ export default function LeaderboardScreen() {
             );
           })}
         </View>
+
+        {sortedUsers.length === 1 ? (
+          <View style={styles.emptyFriendsWrap}>
+            <Text style={styles.emptyFriendsText}>Add friends to compete on the leaderboard 🔥</Text>
+          </View>
+        ) : null}
 
         {/* Get Flamd banner */}
         <View style={styles.getFlamdBanner}>
@@ -244,22 +281,43 @@ export default function LeaderboardScreen() {
 
         {/* Ranked list */}
         <View style={styles.listCard}>
-          {rankedRows.map((row) => (
-            <View key={row.id} style={[styles.rankRow, row.highlight ? styles.rankRowYou : styles.rankRowDefault]}>
-              <Text style={[styles.rankNumber, row.highlight ? styles.rankNumberYou : null]}>{row.rank}</Text>
-              <View style={styles.rankAvatarWrap}>
-                <AvatarCircle initials={row.initials} fill={row.avatarFill} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.rankName, row.highlight ? styles.rankNameYou : null]}>{row.name}</Text>
-                <Text style={[styles.rankStats, row.highlight ? styles.rankStatsYou : null]}>{row.statsLine}</Text>
-              </View>
-              <View style={styles.rankFlameRight}>
-                <Text style={styles.rankFlame}>🔥</Text>
-                <Text style={styles.rankFlameNum}>{row.streakNumber}</Text>
-              </View>
-            </View>
-          ))}
+          {restRows.map((rowUser, i) => {
+            const rank = i + 4;
+            const uid = rowUser.uid ?? '';
+            const isYou = !!user && uid === user.uid;
+            const streak = rowUser.currentStreak ?? 0;
+            const sessions = rowUser.totalWorkouts ?? 0;
+            const name = String(rowUser.username ?? rowUser.displayName ?? 'user');
+            const statsIcon = streak === 0 ? '💔' : '🔥';
+            const statsLine = `${statsIcon} ${streak}d streak · ${sessions} sessions`;
+
+            return (
+              <Pressable
+                key={uid || `row-${rank}`}
+                onPress={() =>
+                  uid
+                    ? router.push({ pathname: '/user-profile', params: { uid } } as any)
+                    : undefined
+                }
+                style={[styles.rankRow, isYou ? styles.rankRowYou : styles.rankRowDefault]}>
+                <Text style={[styles.rankNumber, isYou ? styles.rankNumberYou : null]}>{rank}</Text>
+                <View style={styles.rankAvatarWrap}>
+                  <AvatarCircle
+                    initials={initialsFromDisplayName(displayLabel(rowUser))}
+                    fill="#2A2A2A"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.rankName, isYou ? styles.rankNameYou : null]}>{name}</Text>
+                  <Text style={[styles.rankStats, isYou ? styles.rankStatsYou : null]}>{statsLine}</Text>
+                </View>
+                <View style={styles.rankFlameRight}>
+                  <Text style={styles.rankFlame}>{streak === 0 ? '💔' : '🔥'}</Text>
+                  <Text style={styles.rankFlameNum}>{streak}</Text>
+                </View>
+              </Pressable>
+            );
+          })}
         </View>
 
         {/* Tiebreak rules */}
@@ -289,6 +347,21 @@ export default function LeaderboardScreen() {
 }
 
 const styles = StyleSheet.create({
+  loadingScreen: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyFriendsWrap: {
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    marginBottom: 6,
+  },
+  emptyFriendsText: {
+    color: '#6F6F6F',
+    fontWeight: '800',
+    fontSize: 13,
+    textAlign: 'center',
+  },
   screen: {
     flex: 1,
     backgroundColor: FLAMD.bg,
@@ -590,4 +663,3 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 });
-

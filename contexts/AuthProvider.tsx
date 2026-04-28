@@ -8,6 +8,7 @@ import {
 } from 'firebase/auth';
 
 import { auth } from '@/lib/firebase';
+import { registerForPushNotifications } from '@/lib/notifications';
 
 type AuthContextValue = {
   user: User | null;
@@ -49,6 +50,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(firebaseUser);
           setLoading(false);
           clearTimeout(timeoutId);
+          if (firebaseUser) {
+            void registerForPushNotifications(firebaseUser.uid).catch((err) =>
+              console.warn('[AuthProvider] registerForPushNotifications', err),
+            );
+          }
         },
         (error) => {
           console.log('[AuthProvider] onAuthStateChanged error:', error);

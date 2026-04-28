@@ -23,10 +23,13 @@ export default function RootLayout() {
             name={'profile-setup' as any}
             options={{ headerShown: false }}
           />
+          <Stack.Screen name="add-friends" options={{ headerShown: false }} />
           <Stack.Screen name="log-workout" options={{ headerShown: false }} />
           <Stack.Screen name="log-cardio" options={{ headerShown: false }} />
           <Stack.Screen name="log-pr" options={{ headerShown: false }} />
           <Stack.Screen name="search" options={{ headerShown: false }} />
+          <Stack.Screen name="edit-profile" options={{ headerShown: false }} />
+          <Stack.Screen name="user-profile" options={{ headerShown: false }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
         </Stack>
         <StatusBar style="auto" />

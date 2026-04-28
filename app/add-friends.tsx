@@ -1,3 +1,11 @@
+import { useAuthContext } from '@/contexts/AuthProvider';
+import {
+  followUser,
+  getUser,
+  searchUsersByUsernamePrefix,
+  unfollowUser,
+  type UserDocument,
+} from '@/lib/firestore';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -12,17 +20,6 @@ import {
   View,
 } from 'react-native';
 
-import { useAuthContext } from '@/contexts/AuthProvider';
-import {
-  followUser,
-  getUser,
-  searchUsersByUsernamePrefix,
-  unfollowUser,
-  type UserDocument,
-} from '@/lib/firestore';
-
-export const options = { headerShown: false };
-
 const BG = '#0D0D0D';
 const CARD = '#1A1A1A';
 const ACCENT = '#FF4B1F';
@@ -33,7 +30,7 @@ function initialsFrom(user: UserDocument & { uid: string }): string {
   return (n + n).slice(0, 2).toUpperCase();
 }
 
-export default function SearchScreen() {
+export default function AddFriendsScreen() {
   const router = useRouter();
   const { user } = useAuthContext();
 
@@ -75,7 +72,7 @@ export default function SearchScreen() {
         setResults(filtered);
         setHasSearched(true);
       } catch (e) {
-        console.error('[Search]', e);
+        console.error('[AddFriends]', e);
         setResults([]);
         setHasSearched(true);
       } finally {
@@ -92,7 +89,6 @@ export default function SearchScreen() {
     async (targetUser: UserDocument & { uid: string }) => {
       if (!user) return;
       const targetUid = targetUser.uid;
-      console.log('Following user:', targetUid);
       try {
         await followUser(user.uid, targetUid);
         setFollowingIds((prev) => (prev.includes(targetUid) ? prev : [...prev, targetUid]));
@@ -120,6 +116,10 @@ export default function SearchScreen() {
     [user],
   );
 
+  const goToApp = useCallback(() => {
+    router.replace('/(tabs)/' as any);
+  }, [router]);
+
   const resultsHeader = useMemo(() => {
     if (!debouncedQuery) return '';
     return `RESULTS FOR '${debouncedQuery.toUpperCase()}'`;
@@ -127,35 +127,28 @@ export default function SearchScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.topBar}>
-        <View style={styles.topBarLeft}>
-          <Pressable onPress={() => router.back()} hitSlop={12}>
-            <Text style={styles.backText}>‹ Back</Text>
-          </Pressable>
-        </View>
-        <View style={styles.topBarCenter}>
-          <Text style={styles.topTitle}>Find friends</Text>
-        </View>
-        <View style={styles.topBarRight} />
-      </View>
-
-      <View style={styles.searchBar}>
-        <Text style={styles.searchIcon}>🔍</Text>
-        <TextInput
-          value={searchText}
-          onChangeText={setSearchText}
-          placeholder="Search by username..."
-          placeholderTextColor="#666666"
-          autoCapitalize="none"
-          autoCorrect={false}
-          style={styles.searchInput}
-        />
-      </View>
-
       <ScrollView
+        style={styles.scrollFlex}
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="always"
         showsVerticalScrollIndicator={false}>
+        <Text style={styles.heroEmoji}>🔥</Text>
+        <Text style={styles.heroTitle}>Find your friends</Text>
+        <Text style={styles.heroSub}>{"See who's already on Flamd"}</Text>
+
+        <View style={styles.searchBar}>
+          <Text style={styles.searchIcon}>🔍</Text>
+          <TextInput
+            value={searchText}
+            onChangeText={setSearchText}
+            placeholder="Search by username..."
+            placeholderTextColor="#666666"
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={styles.searchInput}
+          />
+        </View>
+
         {!debouncedQuery ? (
           <>
             <Text style={styles.sectionLabel}>Before searching</Text>
@@ -182,28 +175,19 @@ export default function SearchScreen() {
                         <View key={u.uid}>
                           {idx > 0 ? <View style={styles.divider} /> : null}
                           <View style={styles.row} pointerEvents="box-none">
-                            <Pressable
-                              style={styles.rowTap}
-                              onPress={() =>
-                                router.push({
-                                  pathname: '/user-profile',
-                                  params: { uid: u.uid },
-                                } as any)
-                              }>
-                              <View
-                                style={[
-                                  styles.avatar,
-                                  { backgroundColor: isFollowing ? ACCENT : '#2a2a2a' },
-                                ]}>
-                                <Text style={styles.avatarText}>{initialsFrom(u)}</Text>
-                              </View>
-                              <View style={styles.rowMid} pointerEvents="box-none">
-                                <Text style={styles.username}>{u.username ?? u.uid}</Text>
-                                <Text style={styles.subline}>
-                                  {display} · 🔥 {streak}d streak
-                                </Text>
-                              </View>
-                            </Pressable>
+                            <View
+                              style={[
+                                styles.avatar,
+                                { backgroundColor: isFollowing ? ACCENT : '#2a2a2a' },
+                              ]}>
+                              <Text style={styles.avatarText}>{initialsFrom(u)}</Text>
+                            </View>
+                            <View style={styles.rowMid} pointerEvents="box-none">
+                              <Text style={styles.username}>{u.username ?? u.uid}</Text>
+                              <Text style={styles.subline}>
+                                {display} · 🔥 {streak}d streak
+                              </Text>
+                            </View>
                             {isFollowing ? (
                               <Pressable
                                 style={styles.btnFollowing}
@@ -237,6 +221,18 @@ export default function SearchScreen() {
           </>
         )}
       </ScrollView>
+
+      <View style={styles.bottom}>
+        <Pressable onPress={goToApp} hitSlop={8}>
+          <Text style={styles.skipText}>Skip for now</Text>
+        </Pressable>
+        <TouchableOpacity style={styles.continueBtn} activeOpacity={0.9} onPress={goToApp}>
+          <Text style={styles.continueBtnText}>Continue</Text>
+        </TouchableOpacity>
+        <Text style={styles.bottomHint}>
+          You can always find friends later from the home screen
+        </Text>
+      </View>
     </View>
   );
 }
@@ -247,32 +243,33 @@ const styles = StyleSheet.create({
     backgroundColor: BG,
     paddingTop: 50,
     paddingHorizontal: 16,
+    justifyContent: 'space-between',
   },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  topBarLeft: {
-    flex: 1,
-    alignItems: 'flex-start',
-  },
-  topBarCenter: {
-    flex: 2,
-    alignItems: 'center',
-  },
-  topBarRight: {
+  scrollFlex: {
     flex: 1,
   },
-  backText: {
-    color: '#555555',
-    fontWeight: '800',
-    fontSize: 16,
+  scroll: {
+    paddingBottom: 16,
+    flexGrow: 1,
   },
-  topTitle: {
+  heroEmoji: {
+    fontSize: 48,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  heroTitle: {
     color: '#FFFFFF',
     fontWeight: '900',
-    fontSize: 17,
+    fontSize: 24,
+    textAlign: 'center',
+  },
+  heroSub: {
+    color: '#888888',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 20,
   },
   searchBar: {
     flexDirection: 'row',
@@ -294,9 +291,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     paddingVertical: 0,
   },
-  scroll: {
-    paddingBottom: 40,
-  },
   sectionLabel: {
     color: '#666666',
     fontSize: 10,
@@ -308,12 +302,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 12,
-  },
-  rowTap: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    minWidth: 0,
   },
   divider: {
     height: 1,
@@ -386,5 +374,35 @@ const styles = StyleSheet.create({
   loadingBlock: {
     paddingVertical: 40,
     alignItems: 'center',
+  },
+  bottom: {
+    paddingTop: 8,
+    paddingBottom: 24,
+    gap: 14,
+  },
+  skipText: {
+    color: '#888888',
+    fontWeight: '800',
+    fontSize: 15,
+    textAlign: 'center',
+  },
+  continueBtn: {
+    backgroundColor: ACCENT,
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  continueBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '900',
+    fontSize: 16,
+  },
+  bottomHint: {
+    color: '#666666',
+    fontSize: 11,
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 16,
   },
 });

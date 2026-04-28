@@ -19,6 +19,8 @@ import {
   type UpdateData,
 } from 'firebase/firestore';
 
+import { sendPushNotification } from '@/lib/notifications';
+
 import { db } from '@/lib/firebase';
 
 // ——— Types ———
@@ -28,6 +30,7 @@ export interface UserDocument extends DocumentData {
   username?: string;
   bio?: string;
   avatarUrl?: string;
+  pushToken?: string;
   totalWorkouts?: number;
   /** Last day user posted; empty string until first activity (new users). */
   lastPostDate?: Timestamp | null | '';
@@ -42,6 +45,8 @@ export interface UserDocument extends DocumentData {
 
 export interface PostDocument extends DocumentData {
   userId: string;
+  authorStreak?: number;
+  isPublic?: boolean;
   createdAt?: Timestamp;
   likes?: string[];
   [key: string]: unknown;
@@ -63,20 +68,35 @@ function chunkArray<T>(items: T[], chunkSize: number): T[][] {
   return out;
 }
 
-function dateKey(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+/** Calendar day in UTC, consistent across the streak logic. */
+function isoDateString(d: Date): string {
+  return d.toISOString().split('T')[0];
 }
 
-function timestampToDateKey(ts: Timestamp): string {
-  return dateKey(ts.toDate());
+function todayIsoDate(): string {
+  return isoDateString(new Date());
 }
 
-function shouldSkipStreakUpdate(lastPostDate: Timestamp | null | undefined): boolean {
-  if (!lastPostDate) return false;
-  return timestampToDateKey(lastPostDate) === dateKey(new Date());
+function yesterdayIsoDate(): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - 1);
+  return isoDateString(d);
+}
+
+function timestampToIsoDate(ts: Timestamp): string {
+  return isoDateString(ts.toDate());
+}
+
+function isEmptyLastPostDate(
+  lastPostDate: UserDocument['lastPostDate'],
+): lastPostDate is null | undefined | '' {
+  return lastPostDate == null || lastPostDate === '';
+}
+
+function shouldSkipStreakUpdate(lastPostDate: UserDocument['lastPostDate']): boolean {
+  if (isEmptyLastPostDate(lastPostDate)) return false;
+  if (!(lastPostDate instanceof Timestamp)) return false;
+  return timestampToIsoDate(lastPostDate) === todayIsoDate();
 }
 
 /**
@@ -84,8 +104,13 @@ function shouldSkipStreakUpdate(lastPostDate: Timestamp | null | undefined): boo
  * if never posted → 1. bestStreak updated when current exceeds it.
  */
 function computeStreakValues(data: UserDocument): { currentStreak: number; bestStreak: number } {
-  const lastKey = data.lastPostDate ? timestampToDateKey(data.lastPostDate as Timestamp) : null;
-  const todayKey = dateKey(new Date());
+  const lastPost = data.lastPostDate;
+  const lastKey =
+    !isEmptyLastPostDate(lastPost) && lastPost instanceof Timestamp
+      ? timestampToIsoDate(lastPost)
+      : null;
+  const todayKey = todayIsoDate();
+  const yesterdayKey = yesterdayIsoDate();
 
   if (lastKey === todayKey) {
     return {
@@ -93,10 +118,6 @@ function computeStreakValues(data: UserDocument): { currentStreak: number; bestS
       bestStreak: data.bestStreak ?? 0,
     };
   }
-
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayKey = dateKey(yesterday);
 
   let current: number;
   if (lastKey === null) {
@@ -111,6 +132,21 @@ function computeStreakValues(data: UserDocument): { currentStreak: number; bestS
   return { currentStreak: current, bestStreak: best };
 }
 
+/** If last activity was before yesterday (UTC day), stored streak is stale for UI. Do not persist. */
+function staleStreakShouldReadAsZero(
+  lastPostDate: UserDocument['lastPostDate'],
+  currentStreak: number,
+): boolean {
+  if (currentStreak <= 0) return false;
+  if (isEmptyLastPostDate(lastPostDate)) return false;
+  if (!(lastPostDate instanceof Timestamp)) return false;
+  const lastKey = timestampToIsoDate(lastPostDate);
+  const y = yesterdayIsoDate();
+  const t = todayIsoDate();
+  if (lastKey === t || lastKey === y) return false;
+  return lastKey < y;
+}
+
 // ——— User ———
 
 export async function getUser(uid: string): Promise<UserDocument | null> {
@@ -118,7 +154,12 @@ export async function getUser(uid: string): Promise<UserDocument | null> {
     const ref = doc(db, 'users', uid);
     const snap = await getDoc(ref);
     if (!snap.exists()) return null;
-    return { ...snap.data(), uid } as UserDocument & { uid?: string };
+    const data = { ...snap.data(), uid } as UserDocument & { uid?: string };
+    const streak = data.currentStreak ?? 0;
+    if (staleStreakShouldReadAsZero(data.lastPostDate, streak)) {
+      return { ...data, currentStreak: 0 };
+    }
+    return data;
   } catch (error) {
     console.error('[firestore:getUser]', error);
     throw error instanceof Error ? error : new Error(String(error));
@@ -134,6 +175,26 @@ export async function updateUser(
     await updateDoc(ref, data);
   } catch (error) {
     console.error('[firestore:updateUser]', error);
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+}
+
+/** True if another user already has this lowercase username. */
+export async function isUsernameTakenByOther(
+  normalizedUsername: string,
+  excludeUid: string,
+): Promise<boolean> {
+  try {
+    const q = query(
+      collection(db, 'users'),
+      where('username', '==', normalizedUsername),
+      limit(1),
+    );
+    const snap = await getDocs(q);
+    if (snap.empty) return false;
+    return snap.docs[0].id !== excludeUid;
+  } catch (error) {
+    console.error('[firestore:isUsernameTakenByOther]', error);
     throw error instanceof Error ? error : new Error(String(error));
   }
 }
@@ -228,6 +289,23 @@ export async function getFeedPosts(followingIds: string[]): Promise<PostDocument
   }
 }
 
+export async function getUserPosts(uid: string): Promise<(PostDocument & { id: string })[]> {
+  try {
+    const q = query(
+      collection(db, 'posts'),
+      where('userId', '==', uid),
+      where('isPublic', '==', true),
+      orderBy('createdAt', 'desc'),
+      limit(5),
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as PostDocument & { id: string }));
+  } catch (error) {
+    console.error('[firestore:getUserPosts]', error);
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+}
+
 // ——— Posts ———
 
 export async function createPost(postData: CreatePostInput): Promise<string> {
@@ -270,8 +348,38 @@ export async function unlikePost(postId: string, uid: string): Promise<void> {
 
 // ——— Streak ———
 
+/** If `weekStartDate` is not this calendar week's Monday, reset rest days for the new week. */
+export async function maybeResetWeeklyRestDays(uid: string): Promise<void> {
+  try {
+    const today = new Date();
+    const dayOfWeek = today.getDay();
+    const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - daysFromMonday);
+    const mondayStr = monday.toISOString().split('T')[0];
+
+    const userRef = doc(db, 'users', uid);
+    const userData = await getDoc(userRef);
+    if (!userData.exists()) return;
+    const data = userData.data();
+
+    const isNewWeek = data?.weekStartDate !== mondayStr;
+
+    if (isNewWeek) {
+      await updateDoc(userRef, {
+        restDaysUsedThisWeek: 0,
+        weekStartDate: mondayStr,
+      });
+    }
+  } catch (error) {
+    console.error('[firestore:maybeResetWeeklyRestDays]', error);
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+}
+
 export async function updateStreak(uid: string): Promise<void> {
   try {
+    await maybeResetWeeklyRestDays(uid);
     const userRef = doc(db, 'users', uid);
     const snap = await getDoc(userRef);
     if (!snap.exists()) {
@@ -279,7 +387,18 @@ export async function updateStreak(uid: string): Promise<void> {
     }
     const data = snap.data() as UserDocument;
 
-    if (shouldSkipStreakUpdate(data.lastPostDate as Timestamp | undefined)) {
+    if (shouldSkipStreakUpdate(data.lastPostDate)) {
+      return;
+    }
+
+    if (isEmptyLastPostDate(data.lastPostDate)) {
+      const currentStreak = 1;
+      const bestStreak = Math.max(data.bestStreak ?? 0, currentStreak);
+      await updateDoc(userRef, {
+        currentStreak,
+        bestStreak,
+        lastPostDate: serverTimestamp(),
+      });
       return;
     }
 
@@ -297,6 +416,7 @@ export async function updateStreak(uid: string): Promise<void> {
 
 export async function useRestDay(uid: string): Promise<void> {
   try {
+    await maybeResetWeeklyRestDays(uid);
     const userRef = doc(db, 'users', uid);
     const snap = await getDoc(userRef);
     if (!snap.exists()) {
@@ -391,5 +511,23 @@ export async function getLeaderboard(followingIds: string[]): Promise<UserDocume
   } catch (error) {
     console.error('[firestore:getLeaderboard]', error);
     throw error instanceof Error ? error : new Error(String(error));
+  }
+}
+
+export async function notifyGetFlamd(newLeaderUid: string, displacedUid: string) {
+  try {
+    const displaced = await getDoc(doc(db, 'users', displacedUid));
+    const token = (displaced.data() as UserDocument | undefined)?.pushToken;
+    if (token) {
+      const newLeader = await getDoc(doc(db, 'users', newLeaderUid));
+      const leaderName = (newLeader.data() as UserDocument | undefined)?.username ?? 'Someone';
+      await sendPushNotification(
+        token,
+        'You just got Flamd 🔥',
+        `${leaderName} just took #1 — get back up there`,
+      );
+    }
+  } catch (e) {
+    console.error('[firestore:notifyGetFlamd]', e);
   }
 }
