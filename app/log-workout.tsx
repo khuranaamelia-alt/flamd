@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -17,7 +17,7 @@ import {
 import { increment } from 'firebase/firestore';
 
 import { useAuthContext } from '@/contexts/AuthProvider';
-import { createPost, getUser, updateStreak, updateUser, type UserDocument } from '@/lib/firestore';
+import { createPost, getUser, updateStreak, updateUser } from '@/lib/firestore';
 
 export const options = { headerShown: false };
 
@@ -38,7 +38,6 @@ function newId() {
 export default function LogWorkoutScreen() {
   const router = useRouter();
   const { user } = useAuthContext();
-  const [userData, setUserData] = useState<UserDocument | null>(null);
 
   const [workoutName, setWorkoutName] = useState('');
   const [exercises, setExercises] = useState<Exercise[]>([
@@ -46,14 +45,22 @@ export default function LogWorkoutScreen() {
   ]);
   const [postToFeed, setPostToFeed] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [parsingVoice, setParsingVoice] = useState(false);
+  const [voiceSuccess, setVoiceSuccess] = useState(false);
+  const [parseModalOpen, setParseModalOpen] = useState(false);
+  const [workoutDescription, setWorkoutDescription] = useState('');
 
   const [addExerciseOpen, setAddExerciseOpen] = useState(false);
   const [addExerciseName, setAddExerciseName] = useState('');
+  const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!user) return;
-    getUser(user.uid).then(setUserData);
-  }, [user]);
+    return () => {
+      if (successTimeoutRef.current) {
+        clearTimeout(successTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const hasCompletedSets = useMemo(
     () => exercises.some((ex) => ex.sets.some((s) => s.done)),
@@ -139,6 +146,168 @@ export default function LogWorkoutScreen() {
     setAddExerciseName('');
   }, [addExerciseName]);
 
+  const parseWorkoutWithAI = useCallback(async (spokenText: string) => {
+    setParsingVoice(true);
+    try {
+      const preprocessSpeech = (text: string): string => {
+        return text
+          // Fix common speech-to-text mistakes
+          .replace(/wraps/gi, 'reps')
+          .replace(/wrap/gi, 'rep')
+          .replace(/sets of raps/gi, 'sets reps')
+          // Convert word numbers to digits
+          .replace(/\bone\b/gi, '1')
+          .replace(/\btwo\b/gi, '2')
+          .replace(/\bthree\b/gi, '3')
+          .replace(/\bfour\b/gi, '4')
+          .replace(/\bfive\b/gi, '5')
+          .replace(/\bsix\b/gi, '6')
+          .replace(/\bseven\b/gi, '7')
+          .replace(/\beight\b/gi, '8')
+          .replace(/\bnine\b/gi, '9')
+          .replace(/\bten\b/gi, '10')
+          .replace(/\beleven\b/gi, '11')
+          .replace(/\btwelve\b/gi, '12')
+          .replace(/\bthirteen\b/gi, '13')
+          .replace(/\bfourteen\b/gi, '14')
+          .replace(/\bfifteen\b/gi, '15')
+          .replace(/\bsixteen\b/gi, '16')
+          .replace(/\bseventeen\b/gi, '17')
+          .replace(/\beighteen\b/gi, '18')
+          .replace(/\bnineteen\b/gi, '19')
+          .replace(/\btwenty\b/gi, '20')
+          .replace(/\bthirty\b/gi, '30')
+          .replace(/\bforty\b/gi, '40')
+          .replace(/\bfifty\b/gi, '50')
+          .replace(/\bsixty\b/gi, '60')
+          .replace(/\bseventy\b/gi, '70')
+          .replace(/\beighty\b/gi, '80')
+          .replace(/\bninety\b/gi, '90')
+          .replace(/\bone hundred\b/gi, '100')
+          .replace(/\bone twenty\b/gi, '120')
+          .replace(/\bone fifty\b/gi, '150')
+          .replace(/\btwo hundred\b/gi, '200')
+          // Fix kilos/kilograms
+          .replace(/kilograms/gi, 'kg')
+          .replace(/kilos/gi, 'kg')
+          .replace(/kilo/gi, 'kg')
+          .replace(/pounds/gi, 'lbs');
+      };
+
+      const processedText = preprocessSpeech(spokenText);
+      console.log('Processed text:', processedText);
+      console.log('API key exists:', !!process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY);
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY ?? '',
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 1000,
+          messages: [
+            {
+              role: 'user',
+              content: `You are an expert fitness AI that converts natural spoken workout descriptions into structured data. People speak casually and inconsistently - your job is to understand their intent no matter how they phrase it.
+
+Input: "${processedText}"
+
+Examples of what people might say and how to parse them:
+- 'did bench today, 4 sets, started at 80 went up to 100, all 8 reps' -> bench press, 4 sets varying weights
+- 'chest and tris, bench was 100 for like 5 sets of 8, then some tricep pushdowns 3 sets 12 reps 35 kilos' -> two exercises
+- 'squat 5x5 at 120' -> squat, 5 sets of 5 reps at 120kg
+- 'did legs, squats 4 sets then rdl 3 sets 80kg 10 reps, finished with leg press' -> 3 exercises
+- 'bench press hundred kg eight reps four sets' -> bench press 4 sets 100kg 8 reps
+- 'pullups 3 sets to failure' -> pullups 3 sets, reps empty
+- 'morning workout - overhead press 60kg 4x8, lateral raises 15kg 3x12, face pulls 3x15' -> 3 exercises
+
+Rules:
+- NxM format means N sets of M reps (e.g. 4x8 = 4 sets 8 reps, 5x5 = 5 sets 5 reps)
+- If someone says 'to failure' or doesn't mention reps, use empty string for reps
+- If no weight mentioned, use empty string for kg
+- Understand common exercise nicknames: OHP = overhead press, RDL = romanian deadlift, DB = dumbbell, BB = barbell
+- If weight varies across sets (e.g. 'went up from 80 to 100') create sets with different weights
+- Extract a workout name if mentioned (e.g. 'chest day', 'leg day', 'push day')
+- If someone mentions just an exercise with no sets/reps, create 1 empty set for it
+- All weights should be in kg - if someone says pounds convert to kg (divide by 2.2)
+- Mark all sets as done: true
+- The input has already been preprocessed to convert word numbers to digits and fix common speech errors. Parse it as accurately as possible.
+
+Return ONLY a raw JSON object, no markdown, no backticks, no explanation:
+{
+  "workoutName": "extracted name or empty string",
+  "exercises": [
+    {
+      "name": "full exercise name",
+      "sets": [
+        { "kg": "weight as string", "reps": "reps as string", "done": true }
+      ]
+    }
+  ]
+}`,
+            },
+          ],
+        }),
+      });
+      const data = (await response.json()) as { content?: { text?: string }[] };
+      console.log('API status:', response.status);
+      console.log('API response:', JSON.stringify(data));
+      const raw = data.content?.[0]?.text ?? '';
+      console.log('Raw text:', raw);
+      const clean = raw
+        .replace(/```json/g, '')
+        .replace(/```/g, '')
+        .trim();
+      const parsed = JSON.parse(clean) as {
+        workoutName?: string;
+        exercises?: { name?: string; sets?: { kg?: string; reps?: string; done?: boolean }[] }[];
+      };
+
+      if (parsed.workoutName) setWorkoutName(parsed.workoutName);
+      if (parsed.exercises?.length) {
+        setExercises(
+          parsed.exercises.map((ex, i) => ({
+            id: String(i + 1),
+            name: ex.name ?? '',
+            sets:
+              ex.sets?.length
+                ? ex.sets.map((s) => ({
+                    kg: s.kg ?? '',
+                    reps: s.reps ?? '',
+                    done: s.done ?? true,
+                  }))
+                : [{ kg: '', reps: '', done: true }],
+          })),
+        );
+        setParseModalOpen(false);
+        setWorkoutDescription('');
+        setVoiceSuccess(true);
+        if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
+        successTimeoutRef.current = setTimeout(() => {
+          setVoiceSuccess(false);
+        }, 3000);
+      }
+    } catch {
+      Alert.alert(
+        'Could not parse workout',
+        'Try a clearer description or add exercises manually',
+      );
+    } finally {
+      setParsingVoice(false);
+    }
+  }, []);
+
+  const handleParseWorkoutFromModal = useCallback(() => {
+    const t = workoutDescription.trim();
+    if (!t) {
+      Alert.alert('', 'Describe your workout first.');
+      return;
+    }
+    void parseWorkoutWithAI(t);
+  }, [workoutDescription, parseWorkoutWithAI]);
+
   const finishWorkout = useCallback(async () => {
     if (!user) return;
 
@@ -148,7 +317,6 @@ export default function LogWorkoutScreen() {
     }
 
     const freshUser = await getUser(user.uid);
-    setUserData(freshUser);
     setSaving(true);
     try {
       await createPost({
@@ -178,7 +346,6 @@ export default function LogWorkoutScreen() {
     workoutName,
     exercises,
     postToFeed,
-    userData,
     router,
   ]);
 
@@ -202,19 +369,24 @@ export default function LogWorkoutScreen() {
           </View>
           <View style={styles.topBarRight}>
             <Pressable
-              onPress={finishWorkout}
-              disabled={!hasCompletedSets || saving}
-              hitSlop={12}>
-              <Text
-                style={[
-                  styles.finishHeader,
-                  (!hasCompletedSets || saving) && styles.finishHeaderDisabled,
-                ]}>
-                Finish
-              </Text>
+              onPress={() => setParseModalOpen(true)}
+              hitSlop={10}
+              style={[styles.micBtn, styles.micBtnOff]}>
+              <Text style={styles.micIcon}>🎤</Text>
             </Pressable>
           </View>
         </View>
+        {parsingVoice ? (
+          <View style={styles.voiceBannerParsing}>
+            <ActivityIndicator color="#FFFFFF" size="small" />
+            <Text style={styles.voiceBannerText}>⚡ Reading your workout...</Text>
+          </View>
+        ) : null}
+        {voiceSuccess ? (
+          <View style={styles.voiceBannerSuccess}>
+            <Text style={styles.voiceBannerText}>✅ Workout logged — review and finish</Text>
+          </View>
+        ) : null}
 
         <TextInput
           value={workoutName}
@@ -351,6 +523,43 @@ export default function LogWorkoutScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal visible={parseModalOpen} transparent animationType="fade">
+        <View style={styles.modalBackdrop}>
+          <View style={styles.parseModalCard}>
+            <Text style={styles.modalTitle}>Describe workout</Text>
+            <TextInput
+              value={workoutDescription}
+              onChangeText={setWorkoutDescription}
+              placeholder="Describe your workout... e.g. bench press 4 sets 100kg 8 reps, squat 3 sets 80kg 10 reps"
+              placeholderTextColor="#666666"
+              multiline
+              textAlignVertical="top"
+              editable={!parsingVoice}
+              style={styles.parseModalInput}
+            />
+            <Pressable
+              style={[styles.parseModalPrimary, parsingVoice && styles.parseModalPrimaryDisabled]}
+              onPress={handleParseWorkoutFromModal}
+              disabled={parsingVoice}>
+              {parsingVoice ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.parseModalPrimaryText}>Parse workout</Text>
+              )}
+            </Pressable>
+            <Pressable
+              style={styles.parseModalCancelWrap}
+              onPress={() => {
+                setParseModalOpen(false);
+                setWorkoutDescription('');
+              }}
+              disabled={parsingVoice}>
+              <Text style={styles.parseModalCancelText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -393,14 +602,92 @@ const styles = StyleSheet.create({
     fontSize: 17,
     textAlign: 'center',
   },
-  finishHeader: {
-    color: ACCENT,
+  micBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  micBtnOff: {
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  micIcon: {
+    fontSize: 18,
+  },
+  voiceBannerParsing: {
+    backgroundColor: CARD,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: BORDER,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  voiceBannerSuccess: {
+    backgroundColor: 'rgba(29,158,117,0.25)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(29,158,117,0.5)',
+  },
+  voiceBannerText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  parseModalCard: {
+    backgroundColor: CARD,
+    borderRadius: 14,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: BORDER,
+    width: '100%',
+    maxWidth: 420,
+  },
+  parseModalInput: {
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 15,
+    minHeight: 160,
+    marginBottom: 14,
+  },
+  parseModalPrimary: {
+    backgroundColor: ACCENT,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  parseModalPrimaryDisabled: {
+    opacity: 0.7,
+  },
+  parseModalPrimaryText: {
+    color: '#FFFFFF',
     fontWeight: '900',
     fontSize: 16,
-    textAlign: 'right',
   },
-  finishHeaderDisabled: {
-    color: '#555555',
+  parseModalCancelWrap: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  parseModalCancelText: {
+    color: '#888888',
+    fontWeight: '800',
+    fontSize: 16,
   },
   workoutNameInput: {
     fontSize: 20,
