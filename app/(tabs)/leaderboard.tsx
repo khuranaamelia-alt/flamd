@@ -3,10 +3,9 @@ import {
   type UserDocument,
   getLeaderboard,
   getUser,
-  notifyGetFlamd,
 } from '@/lib/firestore';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -81,7 +80,6 @@ export default function LeaderboardScreen() {
   const [leaderboardUsers, setLeaderboardUsers] = useState<(UserDocument & { uid?: string })[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState<'Streak' | 'Sessions' | 'PRs'>('Streak');
-  const previousTopUidRef = useRef<string | undefined>(undefined);
 
   useFocusEffect(
     useCallback(() => {
@@ -96,23 +94,6 @@ export default function LeaderboardScreen() {
           const followingIds = [...(u?.following ?? []), user.uid];
           const users = await getLeaderboard(followingIds);
           setLeaderboardUsers(users);
-
-          const streakSorted = [...users].sort(
-            (a, b) => (b.currentStreak ?? 0) - (a.currentStreak ?? 0),
-          );
-          const newTopUid = streakSorted[0]?.uid;
-          const prevTop = previousTopUidRef.current;
-          if (
-            prevTop &&
-            newTopUid &&
-            prevTop !== newTopUid &&
-            newTopUid !== user.uid
-          ) {
-            void notifyGetFlamd(newTopUid, prevTop);
-          }
-          if (newTopUid) {
-            previousTopUidRef.current = newTopUid;
-          }
         } finally {
           setLoading(false);
         }
