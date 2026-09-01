@@ -15,9 +15,11 @@ import {
   View,
 } from 'react-native';
 import { increment } from 'firebase/firestore';
+import { Audio } from 'expo-av';
 
 import { useAuthContext } from '@/contexts/AuthProvider';
 import { createPost, getUser, updateStreak, updateUser } from '@/lib/firestore';
+import { transcribeAudio } from '@/lib/whisper';
 
 export const options = { headerShown: false };
 
@@ -53,6 +55,11 @@ export default function LogWorkoutScreen() {
   const [addExerciseOpen, setAddExerciseOpen] = useState(false);
   const [addExerciseName, setAddExerciseName] = useState('');
   const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Voice recording
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingInstance, setRecordingInstance] = useState<Audio.Recording | null>(null);
+  const [transcribing, setTranscribing] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -308,6 +315,64 @@ Return ONLY a raw JSON object, no markdown, no backticks, no explanation:
     void parseWorkoutWithAI(t);
   }, [workoutDescription, parseWorkoutWithAI]);
 
+  const startRecording = useCallback(async () => {
+    try {
+      const { granted } = await Audio.requestPermissionsAsync();
+      if (!granted) {
+        Alert.alert('Mic permission needed', 'Allow microphone access so Flamd can hear your workout.');
+        return;
+      }
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      const { recording } = await Audio.Recording.createAsync({
+        android: {
+          extension: '.m4a',
+          outputFormat: Audio.AndroidOutputFormat.MPEG_4,
+          audioEncoder: Audio.AndroidAudioEncoder.AAC,
+          sampleRate: 44100,
+          numberOfChannels: 1,
+          bitRate: 64000,
+        },
+        ios: {
+          extension: '.m4a',
+          outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
+          audioQuality: Audio.IOSAudioQuality.MEDIUM,
+          sampleRate: 44100,
+          numberOfChannels: 1,
+          bitRate: 64000,
+          linearPCMBitDepth: 16,
+          linearPCMIsBigEndian: false,
+          linearPCMIsFloat: false,
+        },
+        web: { mimeType: 'audio/webm', bitsPerSecond: 64000 },
+      });
+      setRecordingInstance(recording);
+      setIsRecording(true);
+    } catch (e) {
+      console.error('[mic] startRecording', e);
+      Alert.alert('Error', 'Could not start recording — please try again.');
+    }
+  }, []);
+
+  const stopRecordingAndTranscribe = useCallback(async () => {
+    if (!recordingInstance) return;
+    setIsRecording(false);
+    try {
+      await recordingInstance.stopAndUnloadAsync();
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+      const uri = recordingInstance.getURI();
+      setRecordingInstance(null);
+      if (!uri) return;
+      setTranscribing(true);
+      const transcript = await transcribeAudio(uri);
+      if (transcript) setWorkoutDescription(transcript);
+    } catch (e) {
+      console.error('[mic] stopRecordingAndTranscribe', e);
+      Alert.alert('Transcription failed', 'Could not process audio — try typing instead.');
+    } finally {
+      setTranscribing(false);
+    }
+  }, [recordingInstance]);
+
   const finishWorkout = useCallback(async () => {
     if (!user) return;
 
@@ -527,30 +592,69 @@ Return ONLY a raw JSON object, no markdown, no backticks, no explanation:
       <Modal visible={parseModalOpen} transparent animationType="fade">
         <View style={styles.modalBackdrop}>
           <View style={styles.parseModalCard}>
-            <Text style={styles.modalTitle}>Describe workout</Text>
+            <Text style={styles.modalTitle}>Log with voice 🎤</Text>
+
+            {/* Mic button */}
+            <View style={styles.micZone}>
+              {transcribing ? (
+                <View style={styles.micBtnLarge}>
+                  <ActivityIndicator color="#FFFFFF" size="large" />
+                </View>
+              ) : (
+                <Pressable
+                  style={[styles.micBtnLarge, isRecording ? styles.micBtnRecording : styles.micBtnIdle]}
+                  onPress={isRecording ? stopRecordingAndTranscribe : startRecording}
+                  disabled={parsingVoice}>
+                  <Text style={styles.micBtnIcon}>🎤</Text>
+                </Pressable>
+              )}
+              <Text style={styles.micHint}>
+                {transcribing
+                  ? 'Transcribing...'
+                  : isRecording
+                  ? 'Tap to stop recording'
+                  : workoutDescription
+                  ? 'Re-record to redo'
+                  : 'Tap to start recording'}
+              </Text>
+            </View>
+
+            {/* Transcript / manual input */}
             <TextInput
               value={workoutDescription}
               onChangeText={setWorkoutDescription}
-              placeholder="Describe your workout... e.g. bench press 4 sets 100kg 8 reps, squat 3 sets 80kg 10 reps"
-              placeholderTextColor="#666666"
+              placeholder="Or type your workout... e.g. bench 4x8 100kg, squat 3x5 120kg"
+              placeholderTextColor="#555555"
               multiline
               textAlignVertical="top"
-              editable={!parsingVoice}
+              editable={!parsingVoice && !isRecording && !transcribing}
               style={styles.parseModalInput}
             />
+
             <Pressable
-              style={[styles.parseModalPrimary, parsingVoice && styles.parseModalPrimaryDisabled]}
+              style={[
+                styles.parseModalPrimary,
+                (!workoutDescription.trim() || parsingVoice || isRecording || transcribing)
+                  ? styles.parseModalPrimaryDisabled
+                  : null,
+              ]}
               onPress={handleParseWorkoutFromModal}
-              disabled={parsingVoice}>
+              disabled={!workoutDescription.trim() || parsingVoice || isRecording || transcribing}>
               {parsingVoice ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <Text style={styles.parseModalPrimaryText}>Parse workout</Text>
+                <Text style={styles.parseModalPrimaryText}>⚡ Parse workout</Text>
               )}
             </Pressable>
+
             <Pressable
               style={styles.parseModalCancelWrap}
-              onPress={() => {
+              onPress={async () => {
+                if (isRecording && recordingInstance) {
+                  await recordingInstance.stopAndUnloadAsync().catch(() => {});
+                  setIsRecording(false);
+                  setRecordingInstance(null);
+                }
                 setParseModalOpen(false);
                 setWorkoutDescription('');
               }}
@@ -917,6 +1021,84 @@ const styles = StyleSheet.create({
   modalAdd: {
     color: ACCENT,
     fontWeight: '900',
+    fontSize: 16,
+  },
+  // Voice modal
+  micZone: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    marginBottom: 14,
+    gap: 10,
+  },
+  micBtnLarge: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  micBtnIdle: {
+    backgroundColor: '#2a2a2a',
+    borderWidth: 2,
+    borderColor: '#444444',
+  },
+  micBtnRecording: {
+    backgroundColor: ACCENT,
+    borderWidth: 3,
+    borderColor: '#FF7A5C',
+  },
+  micBtnIcon: {
+    fontSize: 36,
+  },
+  micHint: {
+    color: '#888888',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  parseModalCard: {
+    backgroundColor: CARD,
+    borderRadius: 14,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: BORDER,
+    width: '100%',
+    maxWidth: 420,
+  },
+  parseModalInput: {
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 15,
+    minHeight: 100,
+    marginBottom: 14,
+  },
+  parseModalPrimary: {
+    backgroundColor: ACCENT,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  parseModalPrimaryDisabled: {
+    opacity: 0.4,
+  },
+  parseModalPrimaryText: {
+    color: '#FFFFFF',
+    fontWeight: '900',
+    fontSize: 16,
+  },
+  parseModalCancelWrap: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  parseModalCancelText: {
+    color: '#888888',
+    fontWeight: '800',
     fontSize: 16,
   },
 });

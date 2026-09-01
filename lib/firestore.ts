@@ -306,6 +306,47 @@ export async function getUserPosts(uid: string): Promise<(PostDocument & { id: s
   }
 }
 
+/** All recent posts for a user (public + private), for their own profile view. */
+export async function getUserAllRecentPosts(
+  uid: string,
+  limitNum = 5,
+): Promise<(PostDocument & { id: string })[]> {
+  try {
+    const q = query(
+      collection(db, 'posts'),
+      where('userId', '==', uid),
+      orderBy('createdAt', 'desc'),
+      limit(limitNum),
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as PostDocument & { id: string }));
+  } catch (error) {
+    console.error('[firestore:getUserAllRecentPosts]', error);
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+}
+
+/** Posts created by the user in the current calendar month, for "This month" stats. */
+export async function getUserPostsThisMonth(
+  uid: string,
+): Promise<(PostDocument & { id: string })[]> {
+  try {
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const q = query(
+      collection(db, 'posts'),
+      where('userId', '==', uid),
+      where('createdAt', '>=', Timestamp.fromDate(startOfMonth)),
+      orderBy('createdAt', 'desc'),
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as PostDocument & { id: string }));
+  } catch (error) {
+    console.error('[firestore:getUserPostsThisMonth]', error);
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+}
+
 // ——— Posts ———
 
 export async function createPost(postData: CreatePostInput): Promise<string> {
