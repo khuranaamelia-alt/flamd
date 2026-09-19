@@ -1,3 +1,5 @@
+import { File } from 'expo-file-system';
+
 /**
  * Unsigned upload to Cloudinary. Set in `.env`:
  * EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME
@@ -14,10 +16,11 @@ export async function uploadToCloudinary(imageUri: string): Promise<string> {
   }
 
   const formData = new FormData();
+  const imageBytes = new Uint8Array(await new File(imageUri).arrayBuffer());
   formData.append('file', {
-    uri: imageUri,
-    type: 'image/jpeg',
     name: 'profile.jpg',
+    type: 'image/jpeg',
+    bytes: async () => imageBytes,
   } as any);
   formData.append('upload_preset', uploadPreset);
   formData.append('cloud_name', cloudName);

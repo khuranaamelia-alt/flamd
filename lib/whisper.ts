@@ -1,3 +1,5 @@
+import { File } from 'expo-file-system';
+
 /**
  * Transcribe audio using OpenAI Whisper.
  * Set EXPO_PUBLIC_OPENAI_API_KEY in your .env file.
@@ -11,11 +13,12 @@ export async function transcribeAudio(audioUri: string): Promise<string> {
   }
 
   const formData = new FormData();
+  const audioBytes = new Uint8Array(await new File(audioUri).arrayBuffer());
   formData.append('file', {
-    uri: audioUri,
-    type: 'audio/m4a',
     name: 'workout.m4a',
-  } as unknown as Blob);
+    type: 'audio/m4a',
+    bytes: async () => audioBytes,
+  } as any);
   formData.append('model', 'whisper-1');
   // Hint: fitness/gym terminology improves accuracy
   formData.append(

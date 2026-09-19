@@ -15,7 +15,12 @@ import {
   View,
 } from 'react-native';
 import { increment } from 'firebase/firestore';
-import { Audio } from 'expo-av';
+import {
+  useAudioRecorder,
+  RecordingPresets,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+} from 'expo-audio';
 
 import { useAuthContext } from '@/contexts/AuthProvider';
 import { createPost, getUser, updateStreak, updateUser } from '@/lib/firestore';
@@ -57,8 +62,8 @@ export default function LogWorkoutScreen() {
   const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Voice recording
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [isRecording, setIsRecording] = useState(false);
-  const [recordingInstance, setRecordingInstance] = useState<Audio.Recording | null>(null);
   const [transcribing, setTranscribing] = useState(false);
 
   useEffect(() => {
@@ -317,51 +322,31 @@ Return ONLY a raw JSON object, no markdown, no backticks, no explanation:
 
   const startRecording = useCallback(async () => {
     try {
-      const { granted } = await Audio.requestPermissionsAsync();
+      const { granted } = await requestRecordingPermissionsAsync();
       if (!granted) {
         Alert.alert('Mic permission needed', 'Allow microphone access so Flamd can hear your workout.');
         return;
       }
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const { recording } = await Audio.Recording.createAsync({
-        android: {
-          extension: '.m4a',
-          outputFormat: Audio.AndroidOutputFormat.MPEG_4,
-          audioEncoder: Audio.AndroidAudioEncoder.AAC,
-          sampleRate: 44100,
-          numberOfChannels: 1,
-          bitRate: 64000,
-        },
-        ios: {
-          extension: '.m4a',
-          outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
-          audioQuality: Audio.IOSAudioQuality.MEDIUM,
-          sampleRate: 44100,
-          numberOfChannels: 1,
-          bitRate: 64000,
-          linearPCMBitDepth: 16,
-          linearPCMIsBigEndian: false,
-          linearPCMIsFloat: false,
-        },
-        web: { mimeType: 'audio/webm', bitsPerSecond: 64000 },
-      });
-      setRecordingInstance(recording);
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await recorder.prepareToRecordAsync();
+      recorder.record();
       setIsRecording(true);
     } catch (e) {
       console.error('[mic] startRecording', e);
       Alert.alert('Error', 'Could not start recording — please try again.');
     }
-  }, []);
+  }, [recorder]);
 
   const stopRecordingAndTranscribe = useCallback(async () => {
-    if (!recordingInstance) return;
     setIsRecording(false);
     try {
-      await recordingInstance.stopAndUnloadAsync();
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
-      const uri = recordingInstance.getURI();
-      setRecordingInstance(null);
-      if (!uri) return;
+      await recorder.stop();
+      await setAudioModeAsync({ allowsRecording: false });
+      const uri = recorder.uri;
+      if (!uri) {
+        Alert.alert('Transcription failed', 'Could not process audio — try typing instead.');
+        return;
+      }
       setTranscribing(true);
       const transcript = await transcribeAudio(uri);
       if (transcript) setWorkoutDescription(transcript);
@@ -371,7 +356,7 @@ Return ONLY a raw JSON object, no markdown, no backticks, no explanation:
     } finally {
       setTranscribing(false);
     }
-  }, [recordingInstance]);
+  }, [recorder]);
 
   const finishWorkout = useCallback(async () => {
     if (!user) return;
@@ -650,10 +635,9 @@ Return ONLY a raw JSON object, no markdown, no backticks, no explanation:
             <Pressable
               style={styles.parseModalCancelWrap}
               onPress={async () => {
-                if (isRecording && recordingInstance) {
-                  await recordingInstance.stopAndUnloadAsync().catch(() => {});
+                if (isRecording) {
+                  await recorder.stop().catch(() => {});
                   setIsRecording(false);
-                  setRecordingInstance(null);
                 }
                 setParseModalOpen(false);
                 setWorkoutDescription('');
