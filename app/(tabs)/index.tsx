@@ -25,6 +25,21 @@ const COLORS = {
 
 type Story = { id: string; name: string; postedToday: boolean; initials: string };
 
+function postedToday(userId: string, posts: any[]): boolean {
+  const now = new Date();
+  return posts.some((p) => {
+    if (p?.userId !== userId) return false;
+    const ts = p?.createdAt;
+    const d = typeof ts?.toDate === 'function' ? ts.toDate() : null;
+    if (!d) return false;
+    return (
+      d.getFullYear() === now.getFullYear() &&
+      d.getMonth() === now.getMonth() &&
+      d.getDate() === now.getDate()
+    );
+  });
+}
+
 export default function HomeScreen() {
   const router = useRouter();
   const { user } = useAuthContext();
@@ -33,9 +48,11 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [stories, setStories] = useState<Story[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   const loadFeed = useCallback(async () => {
     if (!user) return;
+    setError(null);
     try {
       const u = await getUser(user.uid);
       setUserData(u);
@@ -50,31 +67,35 @@ export default function HomeScreen() {
         return 'YO';
       };
 
+      const selfStory: Story = {
+        id: user.uid,
+        name: u?.displayName ?? 'You',
+        initials: initialsFrom(u?.displayName ?? 'YO'),
+        postedToday: postedToday(user.uid, feedPosts),
+      };
+
       const following = u?.following ?? [];
       if (following.length === 0) {
-        setStories([
-          {
-            id: user.uid,
-            name: u?.displayName ?? 'You',
-            initials: initialsFrom(u?.displayName ?? 'YO'),
-            postedToday: true,
-          },
-        ]);
+        setStories([selfStory]);
       } else {
         const profiles = await Promise.all(following.map((fid) => getUser(fid)));
         const friendStories: Story[] = [];
         profiles.forEach((p, i) => {
           if (!p) return;
+          const uid = following[i];
           const name = p.displayName ?? p.username ?? 'Friend';
           friendStories.push({
-            id: following[i],
+            id: uid,
             name,
             initials: initialsFrom(p.displayName ?? p.username ?? 'FR'),
-            postedToday: false,
+            postedToday: postedToday(uid, feedPosts),
           });
         });
-        setStories(friendStories);
+        setStories([selfStory, ...friendStories]);
       }
+    } catch (e) {
+      console.error('[feed] loadFeed', e);
+      setError("Couldn't load your feed. Tap to retry.");
     } finally {
       setLoading(false);
     }
@@ -168,7 +189,15 @@ export default function HomeScreen() {
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF4B1F" />
           }>
-          {normalizedPosts.length === 0 ? (
+          {error ? (
+            <TouchableOpacity
+              onPress={() => void loadFeed()}
+              style={{ alignItems: 'center', padding: 40 }}>
+              <Text style={{ color: '#444', fontSize: 14, fontWeight: '600', textAlign: 'center' }}>
+                {error}
+              </Text>
+            </TouchableOpacity>
+          ) : normalizedPosts.length === 0 ? (
             <View style={{ alignItems: 'center', padding: 40 }}>
               <Text style={{ color: '#444', fontSize: 14, fontWeight: '600', textAlign: 'center' }}>
                 No posts yet — log a workout or add friends to see their posts here

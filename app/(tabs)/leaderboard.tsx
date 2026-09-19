@@ -72,34 +72,46 @@ const PODIUM_VISUAL: Record<
   3: { podiumHeight: 70, size: 44, avatarFill: '#2B1B12', borderColor: '#B06E2C' },
 };
 
-const PLACEHOLDER_AVATAR = { fill: '#444444', borderColor: '#555555' };
+function getIsoWeekNumber(date = new Date()): number {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+}
 
 export default function LeaderboardScreen() {
   const router = useRouter();
   const { user } = useAuthContext();
   const [leaderboardUsers, setLeaderboardUsers] = useState<(UserDocument & { uid?: string })[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<'Streak' | 'Sessions' | 'PRs'>('Streak');
+
+  const load = useCallback(async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const u = await getUser(user.uid);
+      const followingIds = [...(u?.following ?? []), user.uid];
+      const users = await getLeaderboard(followingIds);
+      setLeaderboardUsers(users);
+    } catch (e) {
+      console.error('[leaderboard] load', e);
+      setError("Couldn't load the leaderboard. Tap to retry.");
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
 
   useFocusEffect(
     useCallback(() => {
-      if (!user) {
-        setLoading(false);
-        return;
-      }
-      const load = async () => {
-        setLoading(true);
-        try {
-          const u = await getUser(user.uid);
-          const followingIds = [...(u?.following ?? []), user.uid];
-          const users = await getLeaderboard(followingIds);
-          setLeaderboardUsers(users);
-        } finally {
-          setLoading(false);
-        }
-      };
       void load();
-    }, [user]),
+    }, [load]),
   );
 
   const sortedUsers = useMemo(() => {
@@ -112,9 +124,6 @@ export default function LeaderboardScreen() {
 
   const groupTabs: GroupTab[] = [
     { id: 'all', label: 'All friends', active: true },
-    { id: 'gym', label: 'Gym Bros', emoji: '🏋️' },
-    { id: 'morning', label: 'Morning Crew', emoji: '🏃' },
-    { id: 'new', label: '+ New group' },
   ];
 
   const categoryTabs: CategoryTab[] = [
@@ -125,27 +134,36 @@ export default function LeaderboardScreen() {
 
   /** Visual order: 2nd, 1st, 3rd (columns left → center → right). */
   const podiumSlots = useMemo(() => {
-    const second = sortedUsers[1];
     const first = sortedUsers[0];
+    const second = sortedUsers[1];
     const third = sortedUsers[2];
-    return [
-      { place: 2 as const, user: second },
-      { place: 1 as const, user: first, crown: true as const },
-      { place: 3 as const, user: third },
-    ];
+    const slots: {
+      place: 1 | 2 | 3;
+      user: (typeof sortedUsers)[number];
+      crown?: true;
+    }[] = [];
+    if (second) slots.push({ place: 2, user: second });
+    if (first) slots.push({ place: 1, user: first, crown: true });
+    if (third) slots.push({ place: 3, user: third });
+    return slots;
   }, [sortedUsers]);
 
   const restRows = sortedUsers.slice(3);
-
-  const getFlamdBanner = {
-    username: displayLabel(sortedUsers[0] ?? { displayName: 'Someone' }),
-    prevUser: displayLabel(sortedUsers[1] ?? { displayName: 'A friend' }),
-  };
 
   if (loading) {
     return (
       <View style={[styles.screen, styles.loadingScreen]}>
         <ActivityIndicator color="#FF4B1F" size="large" />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={[styles.screen, styles.loadingScreen]}>
+        <Pressable onPress={() => void load()} hitSlop={12}>
+          <Text style={styles.emptyFriendsText}>{error}</Text>
+        </Pressable>
       </View>
     );
   }
@@ -156,7 +174,7 @@ export default function LeaderboardScreen() {
         {/* Top bar */}
         <View style={styles.topBar}>
           <Text style={styles.topBarTitle}>Leaderboard</Text>
-          <Text style={styles.topBarWeek}>Week 12</Text>
+          <Text style={styles.topBarWeek}>Week {getIsoWeekNumber()}</Text>
         </View>
 
         {/* Group tabs */}
@@ -200,19 +218,22 @@ export default function LeaderboardScreen() {
         </View>
 
         {/* Podium */}
-        <View style={styles.podiumRow}>
+        <View
+          style={[
+            styles.podiumRow,
+            sortedUsers.length === 1 ? { justifyContent: 'center' } : null,
+          ]}>
           {podiumSlots.map((slot) => {
             const position = slot.place;
             const vis = PODIUM_VISUAL[position];
             const u = slot.user;
-            const placeholder = !u;
-            const name = u ? displayLabel(u) : '—';
-            const streak = u?.currentStreak ?? 0;
+            const name = displayLabel(u);
+            const streak = u.currentStreak ?? 0;
             const streakText =
               streak === 0 ? `💔 ${streak}d` : `🔥 ${streak}d`;
-            const initials = u ? initialsFromDisplayName(displayLabel(u)) : '?';
-            const fill = placeholder ? PLACEHOLDER_AVATAR.fill : vis.avatarFill;
-            const border = placeholder ? PLACEHOLDER_AVATAR.borderColor : vis.borderColor;
+            const initials = initialsFromDisplayName(displayLabel(u));
+            const fill = vis.avatarFill;
+            const border = vis.borderColor;
 
             return (
               <View key={slot.place} style={styles.podiumCol}>
@@ -246,19 +267,21 @@ export default function LeaderboardScreen() {
         ) : null}
 
         {/* Get Flamd banner */}
-        <View style={styles.getFlamdBanner}>
-          <View style={styles.getFlamdLeft}>
-            <Text style={styles.getFlamdFlame}>🔥</Text>
+        {sortedUsers.length >= 2 && sortedUsers[0] && sortedUsers[1] ? (
+          <View style={styles.getFlamdBanner}>
+            <View style={styles.getFlamdLeft}>
+              <Text style={styles.getFlamdFlame}>🔥</Text>
+            </View>
+            <View style={styles.getFlamdTextWrap}>
+              <Text style={styles.getFlamdLine1}>
+                {displayLabel(sortedUsers[0])} just took #1
+              </Text>
+              <Text style={styles.getFlamdLine2}>
+                {displayLabel(sortedUsers[1])} just got Flamd
+              </Text>
+            </View>
           </View>
-          <View style={styles.getFlamdTextWrap}>
-            <Text style={styles.getFlamdLine1}>
-              {getFlamdBanner.username} just took #1
-            </Text>
-            <Text style={styles.getFlamdLine2}>
-              {getFlamdBanner.prevUser} just got Flamd
-            </Text>
-          </View>
-        </View>
+        ) : null}
 
         {/* Ranked list */}
         <View style={styles.listCard}>
