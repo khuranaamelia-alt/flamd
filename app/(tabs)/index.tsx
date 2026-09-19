@@ -7,12 +7,12 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Text,
   TouchableOpacity,
   View,
 } from 'react-native';
 
 import { FeedPostCard, normalizeFirestorePost, type FeedPost } from '@/components/feed-post-card';
+import { Text } from '@/components/ui/text';
 import { useAuthContext } from '@/contexts/AuthProvider';
 import { getFeedPosts, getUser } from '@/lib/firestore';
 

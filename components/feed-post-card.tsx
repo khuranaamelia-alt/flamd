@@ -1,6 +1,8 @@
 import { Timestamp } from 'firebase/firestore';
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
+
+import { Text } from '@/components/ui/text';
 
 export type FlameMeta = { likes: number; comments: number };
 

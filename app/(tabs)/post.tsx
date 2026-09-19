@@ -7,11 +7,11 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   TouchableOpacity,
   View,
 } from 'react-native';
 
+import { Text } from '@/components/ui/text';
 import { useAuthContext } from '@/contexts/AuthProvider';
 import {
   createPost,

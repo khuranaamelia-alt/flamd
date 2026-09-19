@@ -10,7 +10,6 @@ import {
   ScrollView,
   StyleSheet,
   Switch,
-  Text,
   TextInput,
   View,
 } from 'react-native';
@@ -22,6 +21,7 @@ import {
   setAudioModeAsync,
 } from 'expo-audio';
 
+import { Text } from '@/components/ui/text';
 import { useAuthContext } from '@/contexts/AuthProvider';
 import { createPost, getUser, updateStreak, updateUser } from '@/lib/firestore';
 import { transcribeAudio } from '@/lib/whisper';

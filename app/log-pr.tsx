@@ -9,11 +9,11 @@ import {
   ScrollView,
   StyleSheet,
   Switch,
-  Text,
   TextInput,
   View,
 } from 'react-native';
 
+import { Text } from '@/components/ui/text';
 import { useAuthContext } from '@/contexts/AuthProvider';
 import {
   createPost,

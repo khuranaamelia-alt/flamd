@@ -11,9 +11,10 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
+
+import { Text } from '@/components/ui/text';
 
 type GroupTab = { id: string; label: string; emoji?: string; active?: boolean };
 type CategoryTab = { id: 'Streak' | 'Sessions' | 'PRs'; label: string; emoji: string };

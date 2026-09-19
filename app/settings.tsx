@@ -8,10 +8,10 @@ import {
   ScrollView,
   StyleSheet,
   Switch,
-  Text,
   View,
 } from 'react-native';
 
+import { Text } from '@/components/ui/text';
 import { useAuthContext } from '@/contexts/AuthProvider';
 
 export const options = { headerShown: false };

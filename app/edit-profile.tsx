@@ -13,10 +13,11 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from 'react-native';
+
+import { Text } from '@/components/ui/text';
 
 const BG = '#0D0D0D';
 const CARD = '#1A1A1A';
