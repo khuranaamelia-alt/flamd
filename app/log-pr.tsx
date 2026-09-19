@@ -12,6 +12,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/ui/text';
 import { useAuthContext } from '@/contexts/AuthProvider';
@@ -43,6 +44,7 @@ const PRESET_EXERCISES = [
 
 export default function LogPRScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user } = useAuthContext();
 
   const [selectedExercise, setSelectedExercise] = useState('Bench Press');
@@ -137,7 +139,7 @@ export default function LogPRScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.root}
+      style={[styles.root, { paddingTop: insets.top + 12 }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -254,7 +256,6 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: BG,
-    paddingTop: 50,
   },
   scroll: {
     paddingHorizontal: 16,

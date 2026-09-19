@@ -3,6 +3,7 @@ import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleShe
 import { Redirect, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { collection, doc, getDoc, getDocs, limit, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
 
@@ -20,6 +21,7 @@ function normalizeUsername(input: string) {
 
 export default function ProfileSetupScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const scheme = useColorScheme() ?? 'light';
 
@@ -173,7 +175,7 @@ export default function ProfileSetupScreen() {
   }
 
   return (
-    <ThemedView style={styles.container}>
+    <ThemedView style={[styles.container, { paddingTop: insets.top + 12 }]}>
       <KeyboardAvoidingView
         style={styles.content}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -270,7 +272,6 @@ const styles = StyleSheet.create({
   content: { flex: 1 },
   scrollContent: {
     paddingHorizontal: 20,
-    paddingTop: 40,
     alignItems: 'center',
     gap: 12,
   },

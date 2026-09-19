@@ -21,6 +21,7 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/ui/text';
 
@@ -43,6 +44,7 @@ function initialsFromName(name: string): string {
 
 export default function UserProfileScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user } = useAuthContext();
   const params = useLocalSearchParams<{ uid?: string | string[] }>();
   const viewedUid = useMemo(() => {
@@ -111,7 +113,7 @@ export default function UserProfileScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.screen, styles.centered]}>
+      <View style={[styles.screen, styles.centered, { paddingTop: insets.top + 12 }]}>
         <ActivityIndicator color={ACCENT} size="large" />
       </View>
     );
@@ -119,7 +121,7 @@ export default function UserProfileScreen() {
 
   if (!viewedUid || !profile) {
     return (
-      <View style={[styles.screen, styles.centered]}>
+      <View style={[styles.screen, styles.centered, { paddingTop: insets.top + 12 }]}>
         <Text style={styles.errorText}>User not found</Text>
         <Pressable onPress={() => router.back()} style={{ marginTop: 16 }}>
           <Text style={styles.backLink}>‹ Back</Text>
@@ -129,7 +131,7 @@ export default function UserProfileScreen() {
   }
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
       <View style={styles.topBar}>
         <View style={styles.topBarSide}>
           <Pressable onPress={() => router.back()} hitSlop={12}>
@@ -242,7 +244,6 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: BG,
-    paddingTop: 50,
   },
   centered: {
     justifyContent: 'center',

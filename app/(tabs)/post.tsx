@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/ui/text';
 import { useAuthContext } from '@/contexts/AuthProvider';
@@ -26,6 +27,7 @@ const ACCENT = '#FF4B1F';
 
 export default function PostScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user } = useAuthContext();
 
   const [restDaysLeft, setRestDaysLeft] = useState(2);
@@ -106,7 +108,7 @@ export default function PostScreen() {
         : { borderColor: '#333333' as const };
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
@@ -241,7 +243,6 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: BG,
-    paddingTop: 52,
   },
   scroll: {
     paddingHorizontal: 16,

@@ -10,6 +10,7 @@ import {
   Switch,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/ui/text';
 import { useAuthContext } from '@/contexts/AuthProvider';
@@ -57,6 +58,7 @@ function SettingRow({
 
 export default function SettingsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user, signOutUser } = useAuthContext();
   const [notifications, setNotifications] = useState(true);
   const [signingOut, setSigningOut] = useState(false);
@@ -82,7 +84,7 @@ export default function SettingsScreen() {
   };
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
       {/* Top bar */}
       <View style={styles.topBar}>
         <Pressable onPress={() => router.back()} hitSlop={12}>
@@ -205,7 +207,7 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: BG, paddingTop: 55 },
+  screen: { flex: 1, backgroundColor: BG },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -13,6 +13,7 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/ui/text';
 
@@ -83,6 +84,7 @@ function getIsoWeekNumber(date = new Date()): number {
 
 export default function LeaderboardScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user } = useAuthContext();
   const [leaderboardUsers, setLeaderboardUsers] = useState<(UserDocument & { uid?: string })[]>([]);
   const [loading, setLoading] = useState(true);
@@ -153,7 +155,7 @@ export default function LeaderboardScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.screen, styles.loadingScreen]}>
+      <View style={[styles.screen, styles.loadingScreen, { paddingTop: insets.top + 12 }]}>
         <ActivityIndicator color="#FF4B1F" size="large" />
       </View>
     );
@@ -161,7 +163,7 @@ export default function LeaderboardScreen() {
 
   if (error) {
     return (
-      <View style={[styles.screen, styles.loadingScreen]}>
+      <View style={[styles.screen, styles.loadingScreen, { paddingTop: insets.top + 12 }]}>
         <Pressable onPress={() => void load()} hitSlop={12}>
           <Text style={styles.emptyFriendsText}>{error}</Text>
         </Pressable>
@@ -170,7 +172,7 @@ export default function LeaderboardScreen() {
   }
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Top bar */}
         <View style={styles.topBar}>
@@ -238,7 +240,7 @@ export default function LeaderboardScreen() {
 
             return (
               <View key={slot.place} style={styles.podiumCol}>
-                <View style={[styles.podiumStack, { height: vis.podiumHeight }]}>
+                <View style={[styles.podiumStack, { minHeight: vis.podiumHeight }]}>
                   {slot.crown ? <Text style={styles.crown}>👑</Text> : <View style={{ height: 16 }} />}
                   <AvatarCircle
                     initials={initials}
@@ -370,7 +372,6 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: FLAMD.bg,
-    paddingTop: 55,
   },
   scrollContent: {
     paddingTop: 16,
@@ -465,6 +466,7 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
     justifyContent: 'flex-end',
+    paddingTop: 6,
     paddingBottom: 10,
   },
   crown: {

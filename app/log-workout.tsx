@@ -20,6 +20,7 @@ import {
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
 } from 'expo-audio';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/ui/text';
 import { useAuthContext } from '@/contexts/AuthProvider';
@@ -44,6 +45,7 @@ function newId() {
 
 export default function LogWorkoutScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user } = useAuthContext();
 
   const [workoutName, setWorkoutName] = useState('');
@@ -401,7 +403,7 @@ Return ONLY a raw JSON object, no markdown, no backticks, no explanation:
 
   return (
     <KeyboardAvoidingView
-      style={styles.root}
+      style={[styles.root, { paddingTop: insets.top + 12 }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -656,7 +658,6 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: BG,
-    paddingTop: 50,
   },
   scroll: {
     paddingHorizontal: 16,

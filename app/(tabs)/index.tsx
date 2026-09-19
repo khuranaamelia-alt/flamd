@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FeedPostCard, normalizeFirestorePost, type FeedPost } from '@/components/feed-post-card';
 import { Text } from '@/components/ui/text';
@@ -42,6 +43,7 @@ function postedToday(userId: string, posts: any[]): boolean {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user } = useAuthContext();
   const [posts, setPosts] = useState<any[]>([]);
   const [userData, setUserData] = useState<any>(null);
@@ -145,7 +147,7 @@ export default function HomeScreen() {
     .filter((p): p is FeedPost => p != null);
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
       <View style={styles.safeArea}>
         <View style={styles.topBar}>
           <View style={styles.logo}>
@@ -231,7 +233,6 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: '#0D0D0D',
-    paddingTop: 50,
   },
   safeArea: {
     flex: 1,
@@ -341,6 +342,7 @@ const styles = StyleSheet.create({
   },
   feedContent: {
     paddingHorizontal: 16,
+    paddingTop: 14,
     paddingBottom: 30,
     gap: 14,
   },

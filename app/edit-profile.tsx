@@ -16,6 +16,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/ui/text';
 
@@ -32,6 +33,7 @@ function initialsFrom(name: string): string {
 
 export default function EditProfileScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user } = useAuthContext();
 
   const [loading, setLoading] = useState(true);
@@ -141,7 +143,7 @@ export default function EditProfileScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.screen, styles.centered]}>
+      <View style={[styles.screen, styles.centered, { paddingTop: insets.top + 12 }]}>
         <ActivityIndicator color={ACCENT} size="large" />
       </View>
     );
@@ -151,7 +153,7 @@ export default function EditProfileScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.screen}
+      style={[styles.screen, { paddingTop: insets.top + 12 }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -243,7 +245,6 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: BG,
-    paddingTop: 50,
   },
   centered: {
     justifyContent: 'center',

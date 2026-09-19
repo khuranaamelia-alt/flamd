@@ -12,6 +12,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { increment } from 'firebase/firestore';
 
 import { Text } from '@/components/ui/text';
@@ -65,6 +66,7 @@ const formatTime = (seconds: number) => {
 
 export default function LogCardioScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user } = useAuthContext();
 
   const [selectedActivity, setSelectedActivity] = useState('Run');
@@ -165,7 +167,7 @@ export default function LogCardioScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.root}
+      style={[styles.root, { paddingTop: insets.top + 12 }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -272,7 +274,6 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: BG,
-    paddingTop: 50,
   },
   scroll: {
     paddingHorizontal: 16,

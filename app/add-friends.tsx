@@ -18,6 +18,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/ui/text';
 
@@ -33,6 +34,7 @@ function initialsFrom(user: UserDocument & { uid: string }): string {
 
 export default function AddFriendsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user } = useAuthContext();
 
   const [searchText, setSearchText] = useState('');
@@ -127,7 +129,7 @@ export default function AddFriendsScreen() {
   }, [debouncedQuery]);
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
       <ScrollView
         style={styles.scrollFlex}
         contentContainerStyle={styles.scroll}
@@ -242,7 +244,6 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: BG,
-    paddingTop: 50,
     paddingHorizontal: 16,
     justifyContent: 'space-between',
   },

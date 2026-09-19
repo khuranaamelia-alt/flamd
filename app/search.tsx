@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/ui/text';
 import { useAuthContext } from '@/contexts/AuthProvider';
@@ -35,6 +36,7 @@ function initialsFrom(user: UserDocument & { uid: string }): string {
 
 export default function SearchScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user } = useAuthContext();
 
   const [searchText, setSearchText] = useState('');
@@ -126,7 +128,7 @@ export default function SearchScreen() {
   }, [debouncedQuery]);
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
       <View style={styles.topBar}>
         <View style={styles.topBarLeft}>
           <Pressable onPress={() => router.back()} hitSlop={12}>
@@ -245,7 +247,6 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: BG,
-    paddingTop: 50,
     paddingHorizontal: 16,
   },
   topBar: {
